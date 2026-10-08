@@ -84,8 +84,18 @@ export const hodService = {
     const response = await api.post('/hod/teaching-assignments', data);
     return response.data;
   },
+  updateAssignment: async (id, data) => {
+    const response = await api.patch(`/hod/teaching-assignments/${id}`, data);
+    return response.data;
+  },
+  deleteAssignment: async (id) => {
+    const response = await api.delete(`/hod/teaching-assignments/${id}`);
+    return response.data;
+  },
   updateAssignmentStatus: async (id, isActive) => {
-    const response = await api.patch(`/hod/teaching-assignments/${id}/status`, { isActive });
+    const response = await api.patch(`/hod/teaching-assignments/${id}/status`, {
+      status: isActive ? 'ACTIVE' : 'INACTIVE',
+    });
     return response.data;
   },
 

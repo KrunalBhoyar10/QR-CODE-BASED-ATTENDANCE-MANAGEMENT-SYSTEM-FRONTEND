@@ -21,12 +21,13 @@ const Sections = () => {
   const [academicYears, setAcademicYears] = useState([]);
   const [selectedYearId, setSelectedYearId] = useState('');
   const [sections, setSections] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loadingSections, setLoadingSections] = useState(false);
   const [loadingYears, setLoadingYears] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSection, setEditingSection] = useState(null);
-  const [formData, setFormData] = useState({ name: '' });
+  const [formData, setFormData] = useState({ name: '', classTeacherId: '' });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -54,8 +55,14 @@ const Sections = () => {
   const fetchPrograms = async () => {
     setLoading(true);
     try {
-      const res = await hodService.listPrograms();
-      setPrograms(res.data);
+      const [progsRes, teachersRes] = await Promise.all([
+        hodService.listPrograms(),
+        hodService.listTeachers(),
+      ]);
+      const list = Array.isArray(progsRes?.data) ? progsRes.data : [];
+      setPrograms(list);
+      if (list.length > 0) setSelectedProgramId(list[0].id);
+      setTeachers(Array.isArray(teachersRes?.data) ? teachersRes.data : []);
     } catch (err) {
       setError(err.message || 'Failed to fetch programs');
     } finally {
@@ -67,8 +74,9 @@ const Sections = () => {
     setLoadingYears(true);
     try {
       const res = await hodService.listAcademicYears(progId);
-      setAcademicYears(res.data);
-      if (res.data.length > 0) setSelectedYearId(res.data[0].id);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      setAcademicYears(list);
+      if (list.length > 0) setSelectedYearId(list[0].id);
     } catch (err) {
       setError(err.message || 'Failed to fetch academic years');
     } finally {
@@ -80,7 +88,8 @@ const Sections = () => {
     setLoadingSections(true);
     try {
       const res = await hodService.listSections(yearId);
-      setSections(res.data);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      setSections(list);
     } catch (err) {
       setError(err.message || 'Failed to fetch sections');
     } finally {
@@ -90,7 +99,10 @@ const Sections = () => {
 
   const handleOpenModal = (section = null) => {
     setEditingSection(section);
-    setFormData({ name: section?.name || '' });
+    setFormData({
+      name: section?.name || '',
+      classTeacherId: section?.classTeacherId || section?.classTeacher?.id || '',
+    });
     setFormError('');
     setIsModalOpen(true);
   };
@@ -101,9 +113,16 @@ const Sections = () => {
     setFormError('');
     try {
       if (editingSection) {
-        await hodService.updateSection(editingSection.id, formData);
+        await hodService.updateSection(editingSection.id, {
+          name: formData.name,
+          classTeacherId: formData.classTeacherId || null,
+        });
       } else {
-        await hodService.createSection({ name: formData.name, academicYearId: selectedYearId });
+        await hodService.createSection({
+          name: formData.name,
+          academicYearId: selectedYearId,
+          classTeacherId: formData.classTeacherId || null,
+        });
       }
       setIsModalOpen(false);
       fetchSections(selectedYearId);
@@ -117,21 +136,21 @@ const Sections = () => {
   const columns = [
     {
       header: 'Section Name',
-      accessor: (row) => <div className="font-semibold text-slate-900">Section {row.name}</div>
+      render: (row) => <div className="font-semibold text-slate-900">Section {row.name}</div>
     },
     {
       header: 'Students',
-      accessor: (row) => row._count?.students ?? '—'
+      render: (row) => row._count?.students ?? '—'
     },
     {
       header: 'Class Teacher',
-      accessor: (row) => row.teacher
-        ? `${row.teacher.user.firstName} ${row.teacher.user.lastName}`
+      render: (row) => row.teacher
+        ? `${row.teacher.user?.firstName} ${row.teacher.user?.lastName}`
         : <span className="text-slate-400 italic">Unassigned</span>
     },
     {
       header: 'Actions',
-      accessor: (row) => (
+      render: (row) => (
         <Button variant="ghost" size="sm" onClick={() => handleOpenModal(row)}
           className="text-indigo-600 hover:bg-indigo-50">
           <Edit2 className="w-4 h-4" />
@@ -177,7 +196,7 @@ const Sections = () => {
               disabled={!selectedProgramId || loadingYears}
               options={[
                 { value: '', label: loadingYears ? 'Loading...' : '-- Select Year --' },
-                ...academicYears.map(y => ({ value: y.id, label: `Year ${y.year}` }))
+                ...academicYears.map(y => ({ value: y.id, label: `Year ${y.yearNumber ?? y.year}` }))
               ]}
             />
           </div>
@@ -202,8 +221,22 @@ const Sections = () => {
             <div className="p-3 bg-rose-50 text-rose-600 text-sm rounded-lg border border-rose-100">{formError}</div>
           )}
           <Input label="Section Name" required value={formData.name}
-            onChange={(e) => setFormData({ name: e.target.value })}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             placeholder="e.g. A" />
+          <Select
+            label="Class Teacher (Optional)"
+            value={formData.classTeacherId}
+            onChange={(e) => setFormData({ ...formData, classTeacherId: e.target.value })}
+            options={[
+              { value: '', label: '-- No Class Teacher --' },
+              ...teachers
+                .filter(t => t.user?.isActive !== false)
+                .map(t => ({
+                  value: t.id,
+                  label: `${t.user?.firstName} ${t.user?.lastName}`,
+                })),
+            ]}
+          />
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)} disabled={formLoading}>Cancel</Button>
             <Button type="submit" isLoading={formLoading}>{editingSection ? 'Save Changes' : 'Create Section'}</Button>

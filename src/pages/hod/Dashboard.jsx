@@ -24,7 +24,7 @@ const Dashboard = () => {
         ]);
 
         setStats(summary.data);
-        setProgramAttendance(programs.data);
+        setProgramAttendance(Array.isArray(programs.data) ? programs.data : []);
         setLowAttendanceStats(lowAttendance.data);
       } catch (err) {
         setError(err.message || 'Failed to load dashboard data');
@@ -119,18 +119,18 @@ const Dashboard = () => {
           <CardContent className="p-0 max-h-96 overflow-y-auto">
             <div className="divide-y divide-slate-100">
               {programAttendance?.length > 0 ? (
-                programAttendance.map((prog) => (
-                  <div key={prog.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                programAttendance.map((prog, idx) => (
+                  <div key={prog.programId || prog.id || idx} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                     <div>
-                      <p className="font-semibold text-slate-900">{prog.name}</p>
-                      <p className="text-sm text-slate-500">{prog.code}</p>
+                      <p className="font-semibold text-slate-900">{prog.programName || prog.name}</p>
+                      <p className="text-sm text-slate-500">{prog.programCode || prog.code}</p>
                     </div>
                     <div className="text-right">
                       <p className={`font-bold ${parseFloat(prog.attendancePercentage) < 75 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                        {parseFloat(prog.attendancePercentage).toFixed(1)}%
+                        {parseFloat(prog.attendancePercentage || 0).toFixed(1)}%
                       </p>
                       <p className="text-xs text-slate-400">
-                        {prog.presentCount} / {prog.totalStudents} Present
+                        {prog.presentCount ?? 0} / {prog.totalStudents ?? prog.totalRecords ?? 0} Present
                       </p>
                     </div>
                   </div>
@@ -154,17 +154,17 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent className="p-0 max-h-96 overflow-y-auto">
             <div className="divide-y divide-slate-100">
-              {lowAttendanceStats?.students?.slice(0, 5).map((student) => (
-                <div key={student.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+              {lowAttendanceStats?.students?.slice(0, 5).map((student, idx) => (
+                <div key={student.id || student.userId || idx} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                   <div>
-                    <p className="font-semibold text-slate-900">{student.user.firstName} {student.user.lastName}</p>
+                    <p className="font-semibold text-slate-900">{student.user?.firstName} {student.user?.lastName}</p>
                     <p className="text-xs text-slate-500">
-                      {student.enrollmentNumber} • {student.section.program.name} ({student.section.academicYear.year})
+                      {student.enrollmentNumber} • {student.section?.academicYear?.program?.name} (Year {student.section?.academicYear?.yearNumber ?? student.section?.academicYear?.year})
                     </p>
                   </div>
                   <div className="text-right">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800">
-                      {parseFloat(student.attendancePercentage).toFixed(1)}%
+                      {parseFloat(student.attendancePercentage || 0).toFixed(1)}%
                     </span>
                   </div>
                 </div>

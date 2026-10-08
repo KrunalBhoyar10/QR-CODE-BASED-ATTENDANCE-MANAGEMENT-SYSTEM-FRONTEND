@@ -27,7 +27,7 @@ const AcademicYears = () => {
   const [editingYear, setEditingYear] = useState(null);
 
   // Form
-  const [formData, setFormData] = useState({ year: '', semesterCount: '' });
+  const [formData, setFormData] = useState({ yearNumber: '', semesterCount: '2' });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -47,9 +47,10 @@ const AcademicYears = () => {
     setLoadingPrograms(true);
     try {
       const res = await hodService.listPrograms();
-      setPrograms(res.data);
-      if (res.data.length > 0) {
-        setSelectedProgramId(res.data[0].id);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      setPrograms(list);
+      if (list.length > 0) {
+        setSelectedProgramId(list[0].id);
       }
     } catch (err) {
       setError(err.message || 'Failed to fetch programs');
@@ -62,7 +63,8 @@ const AcademicYears = () => {
     setLoadingYears(true);
     try {
       const res = await hodService.listAcademicYears(progId);
-      setAcademicYears(res.data);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      setAcademicYears(list);
     } catch (err) {
       setError(err.message || 'Failed to fetch academic years');
     } finally {
@@ -73,10 +75,10 @@ const AcademicYears = () => {
   const handleOpenModal = (year = null) => {
     if (year) {
       setEditingYear(year);
-      setFormData({ year: year.year, semesterCount: year.semesterCount });
+      setFormData({ yearNumber: year.yearNumber ?? year.year, semesterCount: year.semesterCount ?? 2 });
     } else {
       setEditingYear(null);
-      setFormData({ year: '', semesterCount: '' });
+      setFormData({ yearNumber: '', semesterCount: '2' });
     }
     setFormError('');
     setIsModalOpen(true);
@@ -88,9 +90,16 @@ const AcademicYears = () => {
     setFormError('');
     try {
       if (editingYear) {
-        await hodService.updateAcademicYear(editingYear.id, formData);
+        await hodService.updateAcademicYear(editingYear.id, {
+          label: `Year ${formData.yearNumber}`,
+        });
       } else {
-        await hodService.createAcademicYear({ ...formData, programId: selectedProgramId });
+        await hodService.createAcademicYear({
+          programId: selectedProgramId,
+          yearNumber: Number(formData.yearNumber),
+          semesterCount: Number(formData.semesterCount),
+          label: `Year ${formData.yearNumber}`,
+        });
       }
       setIsModalOpen(false);
       fetchAcademicYears(selectedProgramId);
@@ -104,23 +113,23 @@ const AcademicYears = () => {
   const columns = [
     {
       header: 'Academic Year',
-      accessor: (row) => (
-        <div className="font-medium text-slate-900">{row.year} Year</div>
+      render: (row) => (
+        <div className="font-medium text-slate-900">Year {row.yearNumber ?? row.year}</div>
       )
     },
     {
       header: 'Semesters',
-      accessor: (row) => (
-        <div className="text-slate-600">{row.semesterCount} Semesters</div>
+      render: (row) => (
+        <div className="text-slate-600">{row.semesterCount ?? '—'} Semesters</div>
       )
     },
     {
       header: 'Sections',
-      accessor: (row) => row._count?.sections || 0
+      render: (row) => row._count?.sections ?? 0
     },
     {
       header: 'Actions',
-      accessor: (row) => (
+      render: (row) => (
         <Button
           variant="ghost"
           size="sm"
@@ -204,22 +213,28 @@ const AcademicYears = () => {
             label="Year Number"
             type="number"
             min="1"
-            max="6"
+            max="10"
             required
-            value={formData.year}
-            onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value, 10) || '' })}
-            placeholder="e.g. 1"
+            value={formData.yearNumber}
+            onChange={(e) => setFormData({ ...formData, yearNumber: e.target.value })}
+            placeholder="e.g. 1 for First Year, 2 for Second Year"
           />
-          <Input
-            label="Number of Semesters"
-            type="number"
-            min="1"
-            max="3"
-            required
-            value={formData.semesterCount}
-            onChange={(e) => setFormData({ ...formData, semesterCount: parseInt(e.target.value, 10) || '' })}
-            placeholder="e.g. 2"
-          />
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+              Number of Semesters <span className="text-rose-500">*</span>
+            </label>
+            <select
+              required
+              value={formData.semesterCount}
+              onChange={(e) => setFormData({ ...formData, semesterCount: e.target.value })}
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white text-slate-800"
+            >
+              {[1,2,3,4,5,6,7,8].map(n => (
+                <option key={n} value={n}>{n} Semester{n > 1 ? 's' : ''}</option>
+              ))}
+            </select>
+          </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
             <Button

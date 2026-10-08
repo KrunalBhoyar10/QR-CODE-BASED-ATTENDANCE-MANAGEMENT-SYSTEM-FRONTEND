@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Plus, Power, PowerOff } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
 import { Table } from '../../components/ui/Table';
 import { Modal } from '../../components/ui/Modal';
-import { Badge } from '../../components/ui/Badge';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -17,8 +16,9 @@ const TeacherAssignments = () => {
   const [error, setError] = useState(null);
   const [assignments, setAssignments] = useState([]);
 
-  // For the create-assignment form
+  // For the create/edit assignment form
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState(null);
   const [teachers, setTeachers] = useState([]);
   const [programs, setPrograms] = useState([]);
   const [academicYears, setAcademicYears] = useState([]);
@@ -35,7 +35,8 @@ const TeacherAssignments = () => {
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
   const [loadingYears, setLoadingYears] = useState(false);
-  const [loadingSections, setLoadingSections] = useState(false);
+  const [loadingModalSections, setLoadingModalSections] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -50,10 +51,10 @@ const TeacherAssignments = () => {
         hodService.listPrograms(),
         hodService.listSubjects()
       ]);
-      setAssignments(assignmentsRes.data);
-      setTeachers(teachersRes.data);
-      setPrograms(programsRes.data);
-      setSubjects(subjectsRes.data);
+      setAssignments(Array.isArray(assignmentsRes?.data) ? assignmentsRes.data : (assignmentsRes?.data?.assignments ?? []));
+      setTeachers(Array.isArray(teachersRes?.data) ? teachersRes.data : (teachersRes?.data?.teachers ?? []));
+      setPrograms(Array.isArray(programsRes?.data) ? programsRes.data : []);
+      setSubjects(Array.isArray(subjectsRes?.data) ? subjectsRes.data : []);
     } catch (err) {
       setError(err.message || 'Failed to load assignments');
     } finally {
@@ -70,9 +71,12 @@ const TeacherAssignments = () => {
     setLoadingYears(true);
     try {
       const res = await hodService.listAcademicYears(programId);
-      setAcademicYears(res.data);
-    } catch { setAcademicYears([]); }
-    finally { setLoadingYears(false); }
+      setAcademicYears(Array.isArray(res?.data) ? res.data : []);
+    } catch {
+      setAcademicYears([]);
+    } finally {
+      setLoadingYears(false);
+    }
   };
 
   // Cascade: When year changes, load sections
@@ -80,19 +84,65 @@ const TeacherAssignments = () => {
     setFormData(prev => ({ ...prev, academicYearId: yearId, sectionId: '' }));
     setSections([]);
     if (!yearId) return;
-    setLoadingSections(true);
+    setLoadingModalSections(true);
     try {
       const res = await hodService.listSections(yearId);
-      setSections(res.data);
-    } catch { setSections([]); }
-    finally { setLoadingSections(false); }
+      setSections(Array.isArray(res?.data) ? res.data : []);
+    } catch {
+      setSections([]);
+    } finally {
+      setLoadingModalSections(false);
+    }
   };
 
-  const handleOpenModal = () => {
-    setFormData({ teacherId: '', programId: '', academicYearId: '', sectionId: '', subjectId: '' });
+  const handleOpenModal = async (assignment = null) => {
     setFormError('');
     setAcademicYears([]);
     setSections([]);
+
+    if (assignment) {
+      setEditingAssignment(assignment);
+      const progId = assignment.programId || assignment.program?.id || assignment.section?.academicYear?.programId || '';
+      const yearId = assignment.academicYearId || assignment.academicYear?.id || assignment.section?.academicYearId || '';
+      const secId = assignment.sectionId || assignment.section?.id || '';
+      const teachId = assignment.teacherId || assignment.teacher?.id || '';
+      const subId = assignment.subjectId || assignment.subject?.id || '';
+
+      setFormData({
+        teacherId: teachId,
+        programId: progId,
+        academicYearId: yearId,
+        sectionId: secId,
+        subjectId: subId,
+      });
+
+      // Pre-load cascaded dropdowns
+      if (progId) {
+        setLoadingYears(true);
+        try {
+          const yRes = await hodService.listAcademicYears(progId);
+          setAcademicYears(Array.isArray(yRes?.data) ? yRes.data : []);
+        } catch {
+          setAcademicYears([]);
+        } finally {
+          setLoadingYears(false);
+        }
+      }
+      if (yearId) {
+        setLoadingModalSections(true);
+        try {
+          const sRes = await hodService.listSections(yearId);
+          setSections(Array.isArray(sRes?.data) ? sRes.data : []);
+        } catch {
+          setSections([]);
+        } finally {
+          setLoadingModalSections(false);
+        }
+      }
+    } else {
+      setEditingAssignment(null);
+      setFormData({ teacherId: '', programId: '', academicYearId: '', sectionId: '', subjectId: '' });
+    }
     setIsModalOpen(true);
   };
 
@@ -103,10 +153,18 @@ const TeacherAssignments = () => {
     try {
       const payload = {
         teacherId: formData.teacherId,
+        programId: formData.programId,
+        academicYearId: formData.academicYearId,
         sectionId: formData.sectionId,
-        subjectId: formData.subjectId
+        subjectId: formData.subjectId,
       };
-      await hodService.createAssignment(payload);
+
+      if (editingAssignment) {
+        await hodService.updateAssignment(editingAssignment.id, payload);
+      } else {
+        await hodService.createAssignment(payload);
+      }
+
       setIsModalOpen(false);
       fetchData();
     } catch (err) {
@@ -116,32 +174,41 @@ const TeacherAssignments = () => {
     }
   };
 
-  const handleToggleStatus = async (assignment) => {
+  const handleDeleteAssignment = async (assignmentId) => {
+    if (!window.confirm('Are you sure you want to delete this teaching assignment? This cannot be undone.')) {
+      return;
+    }
+    setDeletingId(assignmentId);
     try {
-      await hodService.updateAssignmentStatus(assignment.id, !assignment.isActive);
+      await hodService.deleteAssignment(assignmentId);
+      if (isModalOpen && editingAssignment?.id === assignmentId) {
+        setIsModalOpen(false);
+      }
       fetchData();
     } catch (err) {
       alert(getErrorMessage(err));
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const columns = [
     {
       header: 'Teacher',
-      accessor: (row) => (
+      render: (row) => (
         <div>
           <div className="font-medium text-slate-900">
-            {row.teacher?.user.firstName} {row.teacher?.user.lastName}
+            {row.teacher?.user?.firstName} {row.teacher?.user?.lastName}
           </div>
-          <div className="text-xs text-slate-500">{row.teacher?.user.email}</div>
+          <div className="text-xs text-slate-500">{row.teacher?.user?.email}</div>
         </div>
       )
     },
     {
       header: 'Program → Year → Section',
-      accessor: (row) => {
-        const prog = row.section?.academicYear?.program?.name || '—';
-        const year = row.section?.academicYear?.year;
+      render: (row) => {
+        const prog = row.program?.name || row.section?.academicYear?.program?.name || '—';
+        const year = row.academicYear?.yearNumber ?? row.section?.academicYear?.yearNumber ?? row.section?.academicYear?.year;
         const sec = row.section?.name;
         return (
           <div className="text-sm text-slate-700">
@@ -154,7 +221,7 @@ const TeacherAssignments = () => {
     },
     {
       header: 'Subject',
-      accessor: (row) => (
+      render: (row) => (
         <div>
           <div className="font-medium text-slate-800">{row.subject?.name}</div>
           <div className="text-xs font-mono text-slate-500">{row.subject?.code}</div>
@@ -162,21 +229,25 @@ const TeacherAssignments = () => {
       )
     },
     {
-      header: 'Status',
-      accessor: (row) => (
-        <Badge variant={row.isActive ? 'success' : 'error'}>
-          {row.isActive ? 'Active' : 'Inactive'}
-        </Badge>
-      )
-    },
-    {
       header: 'Actions',
-      accessor: (row) => (
-        <Button variant="ghost" size="sm"
-          onClick={() => handleToggleStatus(row)}
-          className={row.isActive ? 'text-amber-600 hover:bg-amber-50' : 'text-emerald-600 hover:bg-emerald-50'}>
-          {row.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-        </Button>
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleOpenModal(row)}
+            title="Edit Assignment"
+            className="p-1.5 rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => handleDeleteAssignment(row.id)}
+            disabled={deletingId === row.id}
+            title="Delete Assignment"
+            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       )
     }
   ];
@@ -191,7 +262,7 @@ const TeacherAssignments = () => {
           <h1 className="text-2xl font-bold text-slate-900">Teaching Assignments</h1>
           <p className="text-slate-500 mt-1">Assign teachers to specific programs, years, sections and subjects</p>
         </div>
-        <Button onClick={handleOpenModal} leftIcon={<Plus className="w-4 h-4" />}>
+        <Button onClick={() => handleOpenModal()} leftIcon={<Plus className="w-4 h-4" />}>
           New Assignment
         </Button>
       </div>
@@ -208,19 +279,28 @@ const TeacherAssignments = () => {
             columns={columns}
             data={assignments}
             emptyMessage={
-              <EmptyState icon={Briefcase} title="No assignments yet"
-                message="Create an assignment to link a teacher to a section and subject." />
+              <EmptyState
+                icon={Briefcase}
+                title="No assignments yet"
+                message="Create an assignment to link a teacher to a section and subject."
+              />
             }
           />
         </CardContent>
       </Card>
 
-      {/* Create Assignment Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => !formLoading && setIsModalOpen(false)}
-        title="Create Teaching Assignment" size="md">
+      {/* Create / Edit Assignment Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => !formLoading && !deletingId && setIsModalOpen(false)}
+        title={editingAssignment ? 'Edit Teaching Assignment' : 'Create Teaching Assignment'}
+        size="md"
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           {formError && (
-            <div className="p-3 bg-rose-50 text-rose-600 text-sm rounded-lg border border-rose-100">{formError}</div>
+            <div className="p-3 bg-rose-50 text-rose-600 text-sm rounded-lg border border-rose-100">
+              {formError}
+            </div>
           )}
 
           <Select
@@ -230,14 +310,16 @@ const TeacherAssignments = () => {
             onChange={(e) => setFormData(prev => ({ ...prev, teacherId: e.target.value }))}
             options={[
               { value: '', label: '-- Select Teacher --' },
-              ...teachers.filter(t => t.user.isActive).map(t => ({
-                value: t.id,
-                label: `${t.user.firstName} ${t.user.lastName}`
-              }))
+              ...teachers
+                .filter(t => t.user?.isActive || t.id === formData.teacherId)
+                .map(t => ({
+                  value: t.id,
+                  label: `${t.user?.firstName || ''} ${t.user?.lastName || ''} (${t.user?.email || ''})`
+                }))
             ]}
           />
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Select
               label="Program"
               required
@@ -256,7 +338,10 @@ const TeacherAssignments = () => {
               disabled={!formData.programId || loadingYears}
               options={[
                 { value: '', label: loadingYears ? 'Loading...' : '-- Year --' },
-                ...academicYears.map(y => ({ value: y.id, label: `Year ${y.year}` }))
+                ...academicYears.map(y => ({
+                  value: y.id,
+                  label: y.label || `Year ${y.yearNumber ?? y.year}`
+                }))
               ]}
             />
             <Select
@@ -264,9 +349,9 @@ const TeacherAssignments = () => {
               required
               value={formData.sectionId}
               onChange={(e) => setFormData(prev => ({ ...prev, sectionId: e.target.value }))}
-              disabled={!formData.academicYearId || loadingSections}
+              disabled={!formData.academicYearId || loadingModalSections}
               options={[
-                { value: '', label: loadingSections ? 'Loading...' : '-- Section --' },
+                { value: '', label: loadingModalSections ? 'Loading...' : '-- Section --' },
                 ...sections.map(s => ({ value: s.id, label: `Section ${s.name}` }))
               ]}
             />
@@ -279,13 +364,54 @@ const TeacherAssignments = () => {
             onChange={(e) => setFormData(prev => ({ ...prev, subjectId: e.target.value }))}
             options={[
               { value: '', label: '-- Select Subject --' },
-              ...subjects.map(s => ({ value: s.id, label: `${s.name} (${s.code})` }))
+              ...subjects
+                .filter(s => !formData.programId || !s.programId || s.programId === formData.programId || s.id === formData.subjectId)
+                .map(s => ({ value: s.id, label: `${s.name} (${s.code})` }))
             ]}
           />
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-            <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)} disabled={formLoading}>Cancel</Button>
-            <Button type="submit" isLoading={formLoading}>Create Assignment</Button>
+          <div className="flex items-center justify-between pt-4 border-t border-slate-100 gap-3">
+            {editingAssignment ? (
+              <>
+                <Button
+                  type="button"
+                  variant="danger"
+                  leftIcon={<Trash2 className="w-4 h-4" />}
+                  onClick={() => handleDeleteAssignment(editingAssignment.id)}
+                  isLoading={deletingId === editingAssignment.id}
+                  disabled={formLoading}
+                >
+                  Delete Assignment
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsModalOpen(false)}
+                    disabled={formLoading || deletingId}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" isLoading={formLoading} disabled={deletingId}>
+                    Save Changes
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-end w-full gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsModalOpen(false)}
+                  disabled={formLoading}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" isLoading={formLoading}>
+                  Create Assignment
+                </Button>
+              </div>
+            )}
           </div>
         </form>
       </Modal>

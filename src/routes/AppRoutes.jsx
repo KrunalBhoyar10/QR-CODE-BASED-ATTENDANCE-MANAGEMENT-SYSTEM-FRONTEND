@@ -15,6 +15,7 @@ import RoleRoute from './RoleRoute';
 import Login from '../pages/auth/Login';
 import ForgotPassword from '../pages/auth/ForgotPassword';
 import ResetPassword from '../pages/auth/ResetPassword';
+import ForceChangePassword from '../pages/auth/ForceChangePassword';
 import Dashboard from '../pages/principal/Dashboard';
 import Departments from '../pages/principal/Departments';
 import HodManagement from '../pages/principal/HodManagement';
@@ -70,6 +71,11 @@ export const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+      </Route>
+
+      {/* Force Password Change — outside DashboardLayout, inside ProtectedRoute */}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/change-password" element={<ForceChangePassword />} />
       </Route>
 
       {/* Protected Role-Based Routes */}

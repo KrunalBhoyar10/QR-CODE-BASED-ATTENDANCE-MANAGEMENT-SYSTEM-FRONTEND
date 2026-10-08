@@ -33,8 +33,8 @@ const Students = () => {
         hodService.listStudents(),
         hodService.listPrograms()
       ]);
-      setStudents(studentsRes.data);
-      setPrograms(programsRes.data);
+      setStudents(Array.isArray(studentsRes?.data) ? studentsRes.data : (studentsRes?.data?.students ?? []));
+      setPrograms(Array.isArray(programsRes?.data) ? programsRes.data : []);
     } catch (err) {
       setError(err.message || 'Failed to fetch students');
     } finally {
@@ -46,7 +46,7 @@ const Students = () => {
     setLoading(true);
     try {
       const res = await hodService.listStudents(params);
-      setStudents(res.data);
+      setStudents(Array.isArray(res?.data) ? res.data : (res?.data?.students ?? []));
     } catch (err) {
       setError(err.message || 'Failed to fetch students');
     } finally {
@@ -63,7 +63,7 @@ const Students = () => {
     setLoadingYears(true);
     try {
       const res = await hodService.listAcademicYears(programId);
-      setAcademicYears(res.data);
+      setAcademicYears(Array.isArray(res?.data) ? res.data : []);
     } catch { setAcademicYears([]); }
     finally { setLoadingYears(false); }
     fetchStudents({ programId });
@@ -77,7 +77,7 @@ const Students = () => {
     setLoadingSections(true);
     try {
       const res = await hodService.listSections(academicYearId);
-      setSections(res.data);
+      setSections(Array.isArray(res?.data) ? res.data : []);
     } catch { setSections([]); }
     finally { setLoadingSections(false); }
     fetchStudents({ programId: filters.programId, academicYearId });
@@ -98,7 +98,7 @@ const Students = () => {
   const columns = [
     {
       header: 'Student',
-      accessor: (row) => (
+      render: (row) => (
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-xs">
             {row.user.firstName[0]}
@@ -112,11 +112,11 @@ const Students = () => {
     },
     {
       header: 'Enrollment No.',
-      accessor: (row) => <span className="font-mono text-sm">{row.enrollmentNumber || '—'}</span>
+      render: (row) => <span className="font-mono text-sm">{row.enrollmentNumber || '—'}</span>
     },
     {
       header: 'Program → Section',
-      accessor: (row) => {
+      render: (row) => {
         const prog = row.section?.academicYear?.program?.name;
         const sec = row.section?.name;
         return prog ? `${prog} / Section ${sec}` : '—';
@@ -124,7 +124,7 @@ const Students = () => {
     },
     {
       header: 'Status',
-      accessor: (row) => (
+      render: (row) => (
         <Badge variant={row.user.isActive ? 'success' : 'error'}>
           {row.user.isActive ? 'Active' : 'Inactive'}
         </Badge>
@@ -169,7 +169,7 @@ const Students = () => {
               disabled={!filters.programId || loadingYears}
               options={[
                 { value: '', label: loadingYears ? 'Loading...' : 'All Years' },
-                ...academicYears.map(y => ({ value: y.id, label: `Year ${y.year}` }))
+                ...academicYears.map(y => ({ value: y.id, label: `Year ${y.yearNumber ?? y.year}` }))
               ]}
             />
           </div>

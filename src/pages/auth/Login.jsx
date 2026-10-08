@@ -33,6 +33,13 @@ export const Login = () => {
     try {
       const payload = await login({ email: email.trim(), password });
       const userRole = payload.user?.role;
+      const mustChange = payload.user?.mustChangePassword;
+
+      // If account requires password change, redirect there first
+      if (mustChange) {
+        navigate('/change-password', { replace: true });
+        return;
+      }
 
       // Role-based redirect or original target if matching
       const targetDestination = from || (userRole ? ROLE_DASHBOARDS[userRole] : '/');

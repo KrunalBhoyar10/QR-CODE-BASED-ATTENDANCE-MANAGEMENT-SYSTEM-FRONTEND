@@ -17,6 +17,11 @@ export const principalService = {
     return response.data;
   },
 
+  getAcademicYearWiseAttendance: async (params) => {
+    const response = await api.get('/principal/attendance/academic-years', { params });
+    return response.data;
+  },
+
   getLowAttendance: async (params) => {
     const response = await api.get('/principal/attendance/low-attendance', { params });
     return response.data;
@@ -43,6 +48,11 @@ export const principalService = {
     return response.data;
   },
 
+  deleteHod: async (id) => {
+    const response = await api.delete(`/principal/hods/${id}`);
+    return response.data;
+  },
+
   updateHod: async (id, data) => {
     const response = await api.patch(`/principal/hods/${id}`, data);
     return response.data;
@@ -59,6 +69,11 @@ export const principalService = {
   },
 
   // Departments Navigation
+  createDepartment: async (data) => {
+    const response = await api.post('/principal/departments', data);
+    return response.data;
+  },
+
   getDepartments: async () => {
     const response = await api.get('/principal/departments');
     return response.data;

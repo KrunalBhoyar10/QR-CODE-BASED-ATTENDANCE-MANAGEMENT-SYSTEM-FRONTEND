@@ -24,7 +24,7 @@ const Subjects = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSubject, setEditingSubject] = useState(null);
   const [formData, setFormData] = useState({
-    name: '', code: '', creditHours: '', academicYearId: ''
+    name: '', code: '', credits: '', programId: '', academicYearId: ''
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
@@ -40,8 +40,8 @@ const Subjects = () => {
         hodService.listSubjects(),
         hodService.listPrograms()
       ]);
-      setSubjects(subjectsRes.data);
-      setPrograms(programsRes.data);
+      setSubjects(Array.isArray(subjectsRes?.data) ? subjectsRes.data : []);
+      setPrograms(Array.isArray(programsRes?.data) ? programsRes.data : []);
     } catch (err) {
       setError(err.message || 'Failed to fetch subjects');
     } finally {
@@ -55,23 +55,35 @@ const Subjects = () => {
     setLoadingYears(true);
     try {
       const res = await hodService.listAcademicYears(programId);
-      setAcademicYears(res.data);
+      setAcademicYears(Array.isArray(res?.data) ? res.data : []);
     } catch { setAcademicYears([]); }
     finally { setLoadingYears(false); }
   };
 
-  const handleOpenModal = (subject = null) => {
+  const handleOpenModal = async (subject = null) => {
     if (subject) {
       setEditingSubject(subject);
       setFormData({
         name: subject.name,
         code: subject.code,
-        creditHours: subject.creditHours,
+        credits: subject.credits ?? '',
+        programId: subject.programId || subject.academicYear?.programId || '',
         academicYearId: subject.academicYearId || ''
       });
+      // Pre-load academic years if subject has a program
+      const pId = subject.programId || subject.academicYear?.programId;
+      if (pId) {
+        setLoadingYears(true);
+        try {
+          const res = await hodService.listAcademicYears(pId);
+          setAcademicYears(Array.isArray(res?.data) ? res.data : []);
+        } catch { setAcademicYears([]); }
+        finally { setLoadingYears(false); }
+      }
     } else {
       setEditingSubject(null);
-      setFormData({ name: '', code: '', creditHours: '', academicYearId: '' });
+      setFormData({ name: '', code: '', credits: '', programId: '', academicYearId: '' });
+      setAcademicYears([]);
     }
     setFormError('');
     setIsModalOpen(true);
@@ -85,8 +97,9 @@ const Subjects = () => {
       const payload = {
         name: formData.name,
         code: formData.code,
-        creditHours: parseInt(formData.creditHours, 10),
-        academicYearId: formData.academicYearId
+        credits: formData.credits ? parseInt(formData.credits, 10) : undefined,
+        programId: formData.programId,
+        academicYearId: formData.academicYearId || undefined,
       };
       if (editingSubject) {
         await hodService.updateSubject(editingSubject.id, payload);
@@ -105,7 +118,7 @@ const Subjects = () => {
   const columns = [
     {
       header: 'Subject Name',
-      accessor: (row) => (
+      render: (row) => (
         <div>
           <div className="font-medium text-slate-900">{row.name}</div>
           <div className="text-xs text-slate-500 font-mono">{row.code}</div>
@@ -113,20 +126,20 @@ const Subjects = () => {
       )
     },
     {
-      header: 'Credit Hours',
-      accessor: (row) => (
-        <Badge variant="outline">{row.creditHours} Hrs</Badge>
+      header: 'Credits',
+      render: (row) => (
+        <Badge variant="outline">{row.credits ?? '—'} Credits</Badge>
       )
     },
     {
       header: 'Year',
-      accessor: (row) => row.academicYear
-        ? `${row.academicYear.program.name} – Year ${row.academicYear.year}`
+      render: (row) => row.academicYear
+        ? `${row.academicYear.program.name} – Year ${row.academicYear?.yearNumber ?? row.academicYear?.year}`
         : '—'
     },
     {
       header: 'Status',
-      accessor: (row) => (
+      render: (row) => (
         <Badge variant={row.isActive !== false ? 'success' : 'error'}>
           {row.isActive !== false ? 'Active' : 'Inactive'}
         </Badge>
@@ -134,7 +147,7 @@ const Subjects = () => {
     },
     {
       header: 'Actions',
-      accessor: (row) => (
+      render: (row) => (
         <Button variant="ghost" size="sm" onClick={() => handleOpenModal(row)}
           className="text-indigo-600 hover:bg-indigo-50">
           <Edit2 className="w-4 h-4" />
@@ -180,9 +193,9 @@ const Subjects = () => {
               onChange={(e) => setFormData({ ...formData, code: e.target.value })}
               placeholder="e.g. CS201" />
           </div>
-          <Input label="Credit Hours" type="number" min="1" required value={formData.creditHours}
-            onChange={(e) => setFormData({ ...formData, creditHours: e.target.value })}
-            placeholder="e.g. 3" />
+          <Input label="Credits" type="number" min="1" max="10" value={formData.credits}
+            onChange={(e) => setFormData({ ...formData, credits: e.target.value })}
+            placeholder="e.g. 4" />
           <Select
             label="Program"
             value={formData.programId || ''}
@@ -200,7 +213,7 @@ const Subjects = () => {
             disabled={loadingYears || !formData.programId}
             options={[
               { value: '', label: loadingYears ? 'Loading...' : '-- Select Year --' },
-              ...academicYears.map(y => ({ value: y.id, label: `Year ${y.year}` }))
+              ...academicYears.map(y => ({ value: y.id, label: `Year ${y.yearNumber ?? y.year}` }))
             ]}
           />
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">

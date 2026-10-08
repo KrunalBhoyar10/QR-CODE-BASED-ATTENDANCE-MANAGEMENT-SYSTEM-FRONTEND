@@ -33,7 +33,9 @@ const Programs = () => {
     setLoading(true);
     try {
       const res = await hodService.listPrograms();
-      setPrograms(res.data);
+      // API: { success, data: [...programs] }
+      const list = Array.isArray(res?.data) ? res.data : (res?.data?.programs ?? res?.programs ?? []);
+      setPrograms(list);
     } catch (err) {
       setError(err.message || 'Failed to fetch programs');
     } finally {
@@ -75,13 +77,13 @@ const Programs = () => {
   const columns = [
     {
       header: 'Program Name',
-      accessor: (row) => (
+      render: (row) => (
         <div className="font-medium text-slate-900">{row.name}</div>
       )
     },
     {
       header: 'Program Code',
-      accessor: (row) => (
+      render: (row) => (
         <div className="text-sm font-mono bg-slate-100 px-2 py-1 rounded inline-block text-slate-700">
           {row.code}
         </div>
@@ -89,11 +91,11 @@ const Programs = () => {
     },
     {
       header: 'Academic Years',
-      accessor: (row) => row._count?.academicYears || 0
+      render: (row) => row._count?.academicYears ?? 0
     },
     {
       header: 'Actions',
-      accessor: (row) => (
+      render: (row) => (
         <Button
           variant="ghost"
           size="sm"
