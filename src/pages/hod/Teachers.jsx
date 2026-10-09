@@ -96,10 +96,26 @@ const Teachers = () => {
   };
 
   const handleToggleStatus = async (teacher) => {
+    const newStatus = !teacher.user.isActive;
+    // Optimistic update
+    setTeachers(prev =>
+      prev.map(t =>
+        t.id === teacher.id
+          ? { ...t, user: { ...t.user, isActive: newStatus } }
+          : t
+      )
+    );
     try {
-      await hodService.updateTeacherStatus(teacher.id, !teacher.user.isActive);
-      fetchTeachers();
+      await hodService.updateTeacherStatus(teacher.id, newStatus);
     } catch (err) {
+      // Revert on failure
+      setTeachers(prev =>
+        prev.map(t =>
+          t.id === teacher.id
+            ? { ...t, user: { ...t.user, isActive: !newStatus } }
+            : t
+        )
+      );
       alert(getErrorMessage(err));
     }
   };

@@ -67,12 +67,20 @@ export const AuthProvider = ({ children }) => {
         if (token && savedUser) {
           const userData = JSON.parse(savedUser);
           
-          // Verify token is still valid by fetching profile
-          const response = await axios.get('/teacher/profile');
-          setUser({
-            ...userData,
-            profile: response.data.data
-          });
+          if (userData.role === 'TEACHER') {
+            try {
+              const response = await axios.get('/teacher/profile');
+              setUser({
+                ...userData,
+                profile: response.data.data
+              });
+            } catch (err) {
+              // If profile fetch fails but token might still be valid
+              setUser(userData);
+            }
+          } else {
+            setUser(userData);
+          }
         }
       } catch (error) {
         // Token invalid or expired
@@ -96,13 +104,19 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(userData));
 
-      // Fetch teacher profile
-      const profileResponse = await axios.get('/teacher/profile');
-      
-      setUser({
-        ...userData,
-        profile: profileResponse.data.data
-      });
+      if (userData.role === 'TEACHER') {
+        try {
+          const profileResponse = await axios.get('/teacher/profile');
+          setUser({
+            ...userData,
+            profile: profileResponse.data.data
+          });
+        } catch (err) {
+          setUser(userData);
+        }
+      } else {
+        setUser(userData);
+      }
 
       toast.success('Login successful!');
       return { success: true };

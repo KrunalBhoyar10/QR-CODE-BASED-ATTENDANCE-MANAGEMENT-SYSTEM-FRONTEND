@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { ROLES, ROLE_DASHBOARDS } from '../utils/constants';
 
@@ -11,41 +11,65 @@ import DashboardLayout from '../layouts/DashboardLayout';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 
-// Pages
+// Auth pages
 import Login from '../pages/auth/Login';
 import ForgotPassword from '../pages/auth/ForgotPassword';
 import ResetPassword from '../pages/auth/ResetPassword';
 import ForceChangePassword from '../pages/auth/ForceChangePassword';
-import Dashboard from '../pages/principal/Dashboard';
-import Departments from '../pages/principal/Departments';
+import StudentRegister from '../pages/auth/StudentRegister';
+
+// Principal pages
+import PrincipalDashboard from '../pages/principal/Dashboard';
+import PrincipalDepartments from '../pages/principal/Departments';
 import HodManagement from '../pages/principal/HodManagement';
-import Attendance from '../pages/principal/Attendance';
-import Reports from '../pages/principal/Reports';
+import PrincipalAttendance from '../pages/principal/Attendance';
+import PrincipalReports from '../pages/principal/Reports';
+
+// HOD pages
 import HodDashboard from '../pages/hod/Dashboard';
-import Programs from '../pages/hod/Programs';
-import AcademicYears from '../pages/hod/AcademicYears';
-import Sections from '../pages/hod/Sections';
-import Subjects from '../pages/hod/Subjects';
-import Teachers from '../pages/hod/Teachers';
+import HodDepartments from '../pages/hod/Departments';
+import HodPrograms from '../pages/hod/Programs';
+import HodAcademicYears from '../pages/hod/AcademicYears';
+import HodSections from '../pages/hod/Sections';
+import HodSubjects from '../pages/hod/Subjects';
+import HodTeachers from '../pages/hod/Teachers';
 import TeacherAssignments from '../pages/hod/TeacherAssignments';
-import Students from '../pages/hod/Students';
+import HodStudents from '../pages/hod/Students';
 import HodAttendance from '../pages/hod/Attendance';
 import HodReports from '../pages/hod/Reports';
+
+// Teacher pages
 import TeacherDashboard from '../pages/teacher/TeacherDashboard';
+import TeacherStudents from '../pages/teacher/Students';
+import TeacherSummary from '../pages/teacher/AttendanceSummary';
+
+// Student pages
 import StudentDashboard from '../pages/student/StudentDashboard';
 import ScanAttendance from '../pages/student/ScanAttendance';
 import MyAttendance from '../pages/student/MyAttendance';
 import SubjectAttendance from '../pages/student/SubjectAttendance';
 import AttendanceHistory from '../pages/student/AttendanceHistory';
 import StudentProfile from '../pages/student/StudentProfile';
+
+// Misc
 import Unauthorized from '../pages/Unauthorized';
 import NotFound from '../pages/NotFound';
 import { Loader } from '../components/ui/Loader';
 
-/**
- * Root index redirector based on authentication and user role
- */
-const RootRedirector = () => {
+// ─── Helper: standalone /register/student route wrapper ─────────────────────
+// Defined as a named function declaration so it is always available at the
+// top of the module scope (avoids any TDZ issues with const ordering).
+function StudentRegisterStandalone() {
+  const navigate = useNavigate();
+  return (
+    <StudentRegister
+      onBackToLogin={() => navigate('/login', { replace: true })}
+    />
+  );
+}
+
+// ─── Helper: root path redirector ────────────────────────────────────────────
+function RootRedirector() {
   const { user, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
@@ -58,39 +82,43 @@ const RootRedirector = () => {
 
   const destination = ROLE_DASHBOARDS[user.role] || '/login';
   return <Navigate to={destination} replace />;
-};
+}
 
-export const AppRoutes = () => {
+// ─── Main route tree ──────────────────────────────────────────────────────────
+export function AppRoutes() {
   return (
     <Routes>
       {/* Root redirect */}
       <Route path="/" element={<RootRedirector />} />
 
-      {/* Public Auth Routes */}
+      {/* ── Public Auth Routes (inside AuthLayout card) ── */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Direct URL to student registration wizard */}
+        <Route path="/register/student" element={<StudentRegisterStandalone />} />
       </Route>
 
-      {/* Force Password Change — outside DashboardLayout, inside ProtectedRoute */}
+      {/* Force password change — protected but no sidebar */}
       <Route element={<ProtectedRoute />}>
         <Route path="/change-password" element={<ForceChangePassword />} />
       </Route>
 
-      {/* Protected Role-Based Routes */}
+      {/* ── Protected, role-gated routes (inside DashboardLayout) ── */}
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
-          {/* Principal Route */}
+
+          {/* Principal */}
           <Route path="/principal">
             <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.PRINCIPAL]}>
-                <Dashboard />
+                <PrincipalDashboard />
               </RoleRoute>
             } />
             <Route path="departments" element={
               <RoleRoute allowedRoles={[ROLES.PRINCIPAL]}>
-                <Departments />
+                <PrincipalDepartments />
               </RoleRoute>
             } />
             <Route path="hods" element={
@@ -100,46 +128,56 @@ export const AppRoutes = () => {
             } />
             <Route path="attendance" element={
               <RoleRoute allowedRoles={[ROLES.PRINCIPAL]}>
-                <Attendance />
+                <PrincipalAttendance />
               </RoleRoute>
             } />
             <Route path="reports" element={
               <RoleRoute allowedRoles={[ROLES.PRINCIPAL]}>
-                <Reports />
+                <PrincipalReports />
               </RoleRoute>
             } />
           </Route>
 
-          {/* HOD Route */}
+          {/* HOD */}
           <Route path="/hod">
             <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
                 <HodDashboard />
               </RoleRoute>
             } />
+            <Route path="departments" element={
+              <RoleRoute allowedRoles={[ROLES.HOD]}>
+                <HodDepartments />
+              </RoleRoute>
+            } />
+            <Route path="department" element={
+              <RoleRoute allowedRoles={[ROLES.HOD]}>
+                <HodDepartments />
+              </RoleRoute>
+            } />
             <Route path="programs" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <Programs />
+                <HodPrograms />
               </RoleRoute>
             } />
             <Route path="academic-years" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <AcademicYears />
+                <HodAcademicYears />
               </RoleRoute>
             } />
             <Route path="sections" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <Sections />
+                <HodSections />
               </RoleRoute>
             } />
             <Route path="subjects" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <Subjects />
+                <HodSubjects />
               </RoleRoute>
             } />
             <Route path="teachers" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <Teachers />
+                <HodTeachers />
               </RoleRoute>
             } />
             <Route path="assignments" element={
@@ -149,7 +187,7 @@ export const AppRoutes = () => {
             } />
             <Route path="students" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
-                <Students />
+                <HodStudents />
               </RoleRoute>
             } />
             <Route path="attendance" element={
@@ -164,17 +202,26 @@ export const AppRoutes = () => {
             } />
           </Route>
 
-          {/* Teacher Route */}
-          <Route
-            path="/teacher/dashboard"
-            element={
+          {/* Teacher */}
+          <Route path="/teacher">
+            <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.TEACHER]}>
                 <TeacherDashboard />
               </RoleRoute>
-            }
-          />
+            } />
+            <Route path="students" element={
+              <RoleRoute allowedRoles={[ROLES.TEACHER]}>
+                <TeacherStudents />
+              </RoleRoute>
+            } />
+            <Route path="summary" element={
+              <RoleRoute allowedRoles={[ROLES.TEACHER]}>
+                <TeacherSummary />
+              </RoleRoute>
+            } />
+          </Route>
 
-          {/* Student Routes */}
+          {/* Student */}
           <Route path="/student">
             <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.STUDENT]}>
@@ -207,16 +254,15 @@ export const AppRoutes = () => {
               </RoleRoute>
             } />
           </Route>
+
         </Route>
       </Route>
 
-      {/* Access Denied Page */}
+      {/* Misc */}
       <Route path="/unauthorized" element={<Unauthorized />} />
-
-      {/* 404 Catch-All */}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
-};
+}
 
 export default AppRoutes;

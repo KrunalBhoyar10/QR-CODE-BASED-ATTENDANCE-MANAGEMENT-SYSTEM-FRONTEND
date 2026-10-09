@@ -9,3 +9,4 @@ export { Loader, Skeleton } from './Loader';
 export { EmptyState } from './EmptyState';
 export { ErrorState } from './ErrorState';
 export { ConfirmDialog } from './ConfirmDialog';
+export { SearchableSelect } from './SearchableSelect';

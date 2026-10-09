@@ -66,7 +66,12 @@ api.interceptors.response.use(
 
       try {
         const response = await axios.post(
-          `${api.defaults.baseURL}/auth/refresh`,
+          // Use an absolute path anchored to the current origin so it works
+          // whether VITE_API_BASE_URL is a full URL (desktop) or a relative
+          // path like /api/v1 (mobile via Vite proxy).
+          (api.defaults.baseURL?.startsWith('http')
+            ? `${api.defaults.baseURL}/auth/refresh`
+            : `${window.location.origin}${api.defaults.baseURL}/auth/refresh`),
           { refreshToken }
         );
         const { accessToken, refreshToken: newRefresh } = response.data?.data || {};

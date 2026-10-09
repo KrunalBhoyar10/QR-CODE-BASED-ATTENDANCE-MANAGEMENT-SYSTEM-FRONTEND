@@ -111,6 +111,7 @@ export const DashboardLayout = () => {
     } else if (user.role === ROLES.HOD) {
       links.push(
         { name: 'Dashboard', path: '/hod/dashboard', icon: LayoutDashboard },
+        { name: 'Department', path: '/hod/department', icon: Building2 },
         { name: 'Programs', path: '/hod/programs', icon: BookOpen },
         { name: 'Academic Years', path: '/hod/academic-years', icon: Layers },
         { name: 'Sections', path: '/hod/sections', icon: Grid },
@@ -120,6 +121,12 @@ export const DashboardLayout = () => {
         { name: 'Students', path: '/hod/students', icon: GraduationCap },
         { name: 'Attendance', path: '/hod/attendance', icon: CalendarCheck },
         { name: 'Reports', path: '/hod/reports', icon: FileText }
+      );
+    } else if (user.role === ROLES.TEACHER) {
+      links.push(
+        { name: 'Dashboard', path: '/teacher/dashboard', icon: LayoutDashboard },
+        { name: 'Students', path: '/teacher/students', icon: GraduationCap },
+        { name: 'Attendance Summary', path: '/teacher/summary', icon: CalendarCheck }
       );
     } else if (user.role === ROLES.STUDENT) {
       links.push(

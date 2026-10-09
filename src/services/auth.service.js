@@ -9,6 +9,33 @@ const apiClient = api;
  */
 export const authService = {
   /**
+   * Register a new student account
+   * @param {object} payload - { fullName, email, usn, programId, academicYearId, sectionId, subjectIds, password }
+   */
+  registerStudent: async (payload) => {
+    const response = await apiClient.post('/register/student', payload);
+    return response.data;
+  },
+
+  /**
+   * Verify email OTP during registration (reserved for future email verification flow)
+   * @param {object} payload - { email, otp }
+   */
+  verifyEmailOtp: async (payload) => {
+    const response = await apiClient.post('/register/verify-email', payload);
+    return response.data;
+  },
+
+  /**
+   * Resend email verification OTP (reserved for future email verification flow)
+   * @param {object} payload - { email }
+   */
+  resendEmailOtp: async (payload) => {
+    const response = await apiClient.post('/register/resend-verification', payload);
+    return response.data;
+  },
+
+  /**
    * Login with email and password
    */
   login: async ({ email, password }) => {

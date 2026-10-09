@@ -1,6 +1,20 @@
 import api from './api';
 
 export const hodService = {
+  // Departments
+  getMyDepartment: async () => {
+    const response = await api.get('/hod/my-department');
+    return response.data;
+  },
+  getDepartments: async () => {
+    const response = await api.get('/hod/departments');
+    return response.data;
+  },
+  getProgramsByDepartment: async (deptId) => {
+    const response = await api.get(`/hod/departments/${deptId}/programs`);
+    return response.data;
+  },
+
   // Programs
   listPrograms: async (params) => {
     const response = await api.get('/hod/programs', { params });
@@ -40,6 +54,10 @@ export const hodService = {
   },
   updateSection: async (id, data) => {
     const response = await api.patch(`/hod/sections/${id}`, data);
+    return response.data;
+  },
+  deleteSection: async (id) => {
+    const response = await api.delete(`/hod/sections/${id}`);
     return response.data;
   },
 

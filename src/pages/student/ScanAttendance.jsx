@@ -113,6 +113,19 @@ export default function ScanAttendance() {
   // ── Camera start / stop ──────────────────────────────────────────────────
   const startCamera = async () => {
     setCameraError(null);
+
+    // navigator.mediaDevices is undefined on HTTP non-localhost origins.
+    // Browsers (Chrome, Firefox, Safari on iOS) require a secure context
+    // (HTTPS or localhost) before exposing any media API.
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      setCameraError(
+        'Camera access requires a secure connection (HTTPS). ' +
+        'Open this page using https:// instead of http://, ' +
+        'or use the manual QR entry option below.'
+      );
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -325,6 +338,13 @@ export default function ScanAttendance() {
     );
   };
 
+  // Detect insecure context once on render (doesn't change during session)
+  const isInsecureContext =
+    typeof window !== 'undefined' &&
+    window.location.protocol !== 'https:' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1';
+
   return (
     <div className="max-w-xl mx-auto space-y-6">
       {/* Page header */}
@@ -334,6 +354,30 @@ export default function ScanAttendance() {
           Scan your teacher's QR code to mark attendance. Location and enrollment are verified by the server.
         </p>
       </div>
+
+      {/* Insecure-context warning — shown when phone opens over plain http:// */}
+      {isInsecureContext && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-800 space-y-1">
+            <p className="font-semibold text-sm">HTTPS required for camera &amp; GPS</p>
+            <p>
+              You are on <span className="font-mono font-bold">{window.location.protocol}//{window.location.hostname}</span>.
+              Camera and location APIs only work on <span className="font-semibold">secure (HTTPS)</span> connections.
+            </p>
+            <p>
+              Open this page using{' '}
+              <span className="font-mono font-bold break-all">
+                https://{window.location.hostname}:{window.location.port || '3000'}{window.location.pathname}
+              </span>{' '}
+              and accept the certificate warning.
+            </p>
+            <p className="text-amber-700">
+              Or use the <span className="font-semibold">manual QR entry</span> option below as a fallback.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Step indicator */}
       <div className="flex items-center">
