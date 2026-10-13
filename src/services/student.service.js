@@ -1,4 +1,5 @@
 import apiClient from './api';
+import { coordsToApiFields } from '../utils/geolocation';
 // uses the shared singleton axios instance (token interceptors already attached)
 
 /**
@@ -39,8 +40,52 @@ const studentService = {
    * @param {number|null} payload.longitude
    * @param {object|null} payload.faceVerificationData
    */
-  markAttendance: (payload) =>
-    apiClient.post('/student/attendance/mark', payload).then((r) => r.data?.data),
+  markAttendance: (payload) => {
+    const geo = coordsToApiFields(payload.latitude, payload.longitude, payload.accuracy);
+    const body = {
+      ...payload,
+      ...(geo || {}),
+    };
+    return apiClient
+      .post('/student/attendance/mark', body, { timeout: 60000 })
+      .then((r) => r.data?.data);
+  },
+
+  // ─── Face Photo / Biometrics ─────────────────────────────────────────────
+
+  /**
+   * Register or update face photo.
+   * @param {FormData} formData  Must contain `facePhoto` (File) and `faceDescriptor` (JSON string)
+   */
+  registerFace: (formData) =>
+    apiClient.post('/student/face/register', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    }).then((r) => r.data?.data),
+
+  /**
+   * Change face photo (limited to 2 times, or if teacher-authorized).
+   * @param {FormData} formData  Must contain `facePhoto` (File) and `faceDescriptor` (JSON string)
+   */
+  updateFace: (formData) =>
+    apiClient.patch('/student/face/update', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    }).then((r) => r.data?.data),
+
+  /**
+   * Get current face registration status, change count, and teacher-auth status.
+   * Returns { hasPhoto, changeCount, changeLimit, teacherAuthorized, facePhotoUrl }
+   */
+  getFaceStatus: () =>
+    apiClient.get('/student/face/status').then((r) => r.data?.data),
+
+  /**
+   * Check if a specific session is still active and if student already marked attendance.
+   * Returns { sessionActive: bool, alreadyMarked: bool }
+   */
+  checkSessionStatus: (sessionId) =>
+    apiClient.get(`/student/attendance/session-status/${sessionId}`).then((r) => r.data?.data).catch(() => null),
 
   // ─── Attendance Data ──────────────────────────────────────────────────────
   getAttendanceSummary: () =>

@@ -18,9 +18,9 @@ export const ROLE_LABELS = Object.freeze({
 
 export const ROLE_DASHBOARDS = Object.freeze({
   [ROLES.PRINCIPAL]: '/principal/dashboard',
-  [ROLES.HOD]: '/hod/dashboard',
+  [ROLES.HOD]: '/hod/department',
   [ROLES.TEACHER]: '/teacher/dashboard',
-  [ROLES.STUDENT]: '/student/dashboard',
+  [ROLES.STUDENT]: '/student/scan',
 });
 
 export const STORAGE_KEYS = Object.freeze({

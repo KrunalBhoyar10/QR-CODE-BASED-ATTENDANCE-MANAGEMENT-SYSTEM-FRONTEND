@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   User, Mail, Phone, Hash, Building2, GraduationCap,
-  KeyRound, Save, X, Eye, EyeOff, AlertTriangle, CheckCircle2,
+  KeyRound, Save, X, Eye, EyeOff, AlertTriangle, CheckCircle2, ShieldCheck,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -11,6 +11,7 @@ import { Badge } from '../../components/ui/Badge';
 import { useAuth } from '../../hooks/useAuth';
 import studentService from '../../services/student.service';
 import { getErrorMessage } from '../../utils/error';
+import FaceRegistration from '../../components/FaceRegistration';
 
 const Field = ({ icon: Icon, label, value }) => (
   <div className="flex items-start gap-3 py-3 border-b border-slate-100 last:border-0">
@@ -142,7 +143,6 @@ export default function StudentProfile() {
           {/* Identity info */}
           <Card title="Academic Identity">
             <CardContent className="py-0 px-6">
-              <Field icon={Hash}        label="Roll Number"       value={profile.rollNumber} />
               <Field icon={Hash}        label="Enrollment Number" value={profile.enrollmentNumber} />
               <Field icon={Building2}   label="Department"        value={profile.department ? `${profile.department.name} (${profile.department.code})` : null} />
               <Field icon={GraduationCap} label="Program"        value={profile.program ? `${profile.program.name} (${profile.program.code})` : null} />
@@ -234,6 +234,20 @@ export default function StudentProfile() {
                 <p className="text-xs text-slate-500">Change your account password. All other sessions will be invalidated for security.</p>
               </CardContent>
             )}
+          </Card>
+
+          {/* Face Verification Registration */}
+          <Card
+            title={
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                Face Verification
+              </span>
+            }
+          >
+            <CardContent>
+              <FaceRegistration onSuccess={() => {}} />
+            </CardContent>
           </Card>
         </>
       )}

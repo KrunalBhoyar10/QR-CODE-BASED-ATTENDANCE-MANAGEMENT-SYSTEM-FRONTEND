@@ -10,6 +10,34 @@ import { ErrorState } from '../../components/ui/ErrorState';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { hodService } from '../../services/hod.service';
 import { getErrorMessage } from '../../utils/error';
+import { filterActiveSubjects, isSubjectDeleted } from '../../utils/subjects';
+
+const getSubjectAcademicYearId = (subject) =>
+  subject?.academicYearId ||
+  subject?.academicYear?.id ||
+  subject?.academic_year_id ||
+  (Array.isArray(subject?.sections) && subject.sections[0]?.academicYearId) ||
+  (Array.isArray(subject?.sections) && subject.sections[0]?.academicYear?.id) ||
+  null;
+
+const getSubjectProgramId = (subject) =>
+  subject?.programId ||
+  subject?.program?.id ||
+  subject?.program_id ||
+  subject?.academicYear?.programId ||
+  subject?.academicYear?.program?.id ||
+  (Array.isArray(subject?.sections) && subject.sections[0]?.academicYear?.programId) ||
+  (Array.isArray(subject?.sections) && subject.sections[0]?.academicYear?.program?.id) ||
+  null;
+
+const filterSubjectsForProgramYear = (list, programId, academicYearId) =>
+  (Array.isArray(list) ? list : []).filter((s) => {
+    const sProgId = getSubjectProgramId(s);
+    const sYearId = getSubjectAcademicYearId(s);
+    const progOk = !sProgId || sProgId === programId;
+    const yearOk = !sYearId || sYearId === academicYearId;
+    return progOk && yearOk;
+  });
 
 const TeacherAssignments = () => {
   const [loading, setLoading] = useState(true);
@@ -36,6 +64,7 @@ const TeacherAssignments = () => {
   const [formError, setFormError] = useState('');
   const [loadingYears, setLoadingYears] = useState(false);
   const [loadingModalSections, setLoadingModalSections] = useState(false);
+  const [loadingModalSubjects, setLoadingModalSubjects] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
@@ -45,16 +74,14 @@ const TeacherAssignments = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [assignmentsRes, teachersRes, programsRes, subjectsRes] = await Promise.all([
+      const [assignmentsRes, teachersRes, programsRes] = await Promise.all([
         hodService.listAssignments(),
         hodService.listTeachers(),
         hodService.listPrograms(),
-        hodService.listSubjects()
       ]);
       setAssignments(Array.isArray(assignmentsRes?.data) ? assignmentsRes.data : (assignmentsRes?.data?.assignments ?? []));
       setTeachers(Array.isArray(teachersRes?.data) ? teachersRes.data : (teachersRes?.data?.teachers ?? []));
       setPrograms(Array.isArray(programsRes?.data) ? programsRes.data : []);
-      setSubjects(Array.isArray(subjectsRes?.data) ? subjectsRes.data : []);
     } catch (err) {
       setError(err.message || 'Failed to load assignments');
     } finally {
@@ -62,11 +89,37 @@ const TeacherAssignments = () => {
     }
   };
 
+  const loadFormSubjects = async (programId, academicYearId, selectedSubject = null) => {
+    if (!programId || !academicYearId) {
+      setSubjects([]);
+      return;
+    }
+    setLoadingModalSubjects(true);
+    try {
+      const res = await hodService.listSubjectsByYear(programId, academicYearId);
+      let list = filterActiveSubjects(Array.isArray(res?.data) ? res.data : []);
+      list = filterSubjectsForProgramYear(list, programId, academicYearId);
+      if (
+        selectedSubject?.id &&
+        !isSubjectDeleted(selectedSubject) &&
+        !list.some((s) => s.id === selectedSubject.id)
+      ) {
+        list = [...list, selectedSubject];
+      }
+      setSubjects(list);
+    } catch {
+      setSubjects([]);
+    } finally {
+      setLoadingModalSubjects(false);
+    }
+  };
+
   // Cascade: When program changes, load academic years
   const handleProgramChange = async (programId) => {
-    setFormData(prev => ({ ...prev, programId, academicYearId: '', sectionId: '' }));
+    setFormData(prev => ({ ...prev, programId, academicYearId: '', sectionId: '', subjectId: '' }));
     setAcademicYears([]);
     setSections([]);
+    setSubjects([]);
     if (!programId) return;
     setLoadingYears(true);
     try {
@@ -81,8 +134,10 @@ const TeacherAssignments = () => {
 
   // Cascade: When year changes, load sections
   const handleYearChange = async (yearId) => {
-    setFormData(prev => ({ ...prev, academicYearId: yearId, sectionId: '' }));
+    const programId = formData.programId;
+    setFormData(prev => ({ ...prev, academicYearId: yearId, sectionId: '', subjectId: '' }));
     setSections([]);
+    setSubjects([]);
     if (!yearId) return;
     setLoadingModalSections(true);
     try {
@@ -93,12 +148,14 @@ const TeacherAssignments = () => {
     } finally {
       setLoadingModalSections(false);
     }
+    await loadFormSubjects(programId, yearId);
   };
 
   const handleOpenModal = async (assignment = null) => {
     setFormError('');
     setAcademicYears([]);
     setSections([]);
+    setSubjects([]);
 
     if (assignment) {
       setEditingAssignment(assignment);
@@ -138,6 +195,12 @@ const TeacherAssignments = () => {
         } finally {
           setLoadingModalSections(false);
         }
+      }
+      if (progId && yearId) {
+        await loadFormSubjects(progId, yearId, assignment.subject || null);
+      }
+      if (assignment.subject && isSubjectDeleted(assignment.subject)) {
+        setFormData((prev) => ({ ...prev, subjectId: '' }));
       }
     } else {
       setEditingAssignment(null);
@@ -362,11 +425,20 @@ const TeacherAssignments = () => {
             required
             value={formData.subjectId}
             onChange={(e) => setFormData(prev => ({ ...prev, subjectId: e.target.value }))}
+            disabled={!formData.programId || !formData.academicYearId || loadingModalSubjects}
             options={[
-              { value: '', label: '-- Select Subject --' },
-              ...subjects
-                .filter(s => !formData.programId || !s.programId || s.programId === formData.programId || s.id === formData.subjectId)
-                .map(s => ({ value: s.id, label: `${s.name} (${s.code})` }))
+              {
+                value: '',
+                label: loadingModalSubjects
+                  ? 'Loading subjects...'
+                  : !formData.programId || !formData.academicYearId
+                  ? '-- Select program and year first --'
+                  : '-- Select Subject --',
+              },
+              ...subjects.map((s) => ({
+                value: s.id,
+                label: `${s.name} (${s.code})`,
+              })),
             ]}
           />
 

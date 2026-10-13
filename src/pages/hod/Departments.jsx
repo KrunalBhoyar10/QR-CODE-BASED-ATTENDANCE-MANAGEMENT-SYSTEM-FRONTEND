@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Building2, BookOpen, ChevronRight, Users, BarChart2,
-  GraduationCap, Layers, AlertCircle, Grid, UserCheck, ShieldCheck,
+  Building2, BookOpen, ChevronRight, Users,
+  GraduationCap, Layers, AlertCircle, Grid, ShieldCheck,
 } from 'lucide-react';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { Badge } from '../../components/ui/Badge';
-import { Card, CardContent } from '../../components/ui/Card';
 import { hodService } from '../../services/hod.service';
 import { useAuth } from '../../hooks/useAuth';
 import { getErrorMessage } from '../../utils/error';
@@ -18,18 +17,6 @@ const attColor = (p) =>
     : p >= 50
     ? 'text-amber-600 bg-amber-50 border-amber-200'
     : 'text-rose-600 bg-rose-50 border-rose-200';
-
-/* ── Stat box ──────────────────────────────────────────────────────── */
-const StatBox = ({ icon: Icon, label, value, sub, color = 'indigo' }) => (
-  <div className={`bg-${color}-50 border border-${color}-100 rounded-xl p-4`}>
-    <div className={`flex items-center gap-1.5 text-${color}-500 mb-2`}>
-      <Icon className="w-4 h-4" />
-      <span className="text-xs font-medium">{label}</span>
-    </div>
-    <p className={`text-2xl font-bold text-${color}-700`}>{value ?? '—'}</p>
-    {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
-  </div>
-);
 
 /* ── Breadcrumb ────────────────────────────────────────────────────── */
 const Breadcrumb = ({ items }) => (
@@ -55,26 +42,54 @@ const Breadcrumb = ({ items }) => (
 /* ══════════════════════════════════════════════════════════════════════
    LEVEL 2 — Year Detail
 ══════════════════════════════════════════════════════════════════════ */
-const YearDetail = ({ year, program, dept, onBackToDepartment, onBackToProgram }) => {
-  const [sections, setSections] = useState([]);
+const parseStudentList = (res) => {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.students)) return res.data.students;
+  if (Array.isArray(res?.students)) return res.students;
+  return [];
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   LEVEL 3 — Section Detail (students)
+══════════════════════════════════════════════════════════════════════ */
+const SectionDetail = ({
+  section,
+  year,
+  program,
+  dept,
+  onBackToDepartment,
+  onBackToProgram,
+  onBackToYear,
+}) => {
+  const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [attendance, setAttendance] = useState(null);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [secRes, attRes] = await Promise.all([
-          hodService.listSections(year.id),
-          hodService.getAcademicYearAttendance({ programId: program.id }).catch(() => ({ data: [] })),
-        ]);
-        setSections(Array.isArray(secRes?.data) ? secRes.data : []);
-        const yearAtt = (Array.isArray(attRes?.data) ? attRes.data : []).find(
-          (a) => a.academicYearId === year.id
-        );
-        setAttendance(yearAtt || null);
+        const filterBySection = (rows) =>
+          rows.filter((s) => (s.sectionId || s.section?.id) === section.id);
+
+        const res = await hodService.listStudents({
+          programId: program.id,
+          academicYearId: year.id,
+          sectionId: section.id,
+        });
+        let list = parseStudentList(res);
+        if (list.some((s) => s.sectionId || s.section?.id)) {
+          list = filterBySection(list);
+        } else if (list.length === 0) {
+          const broadRes = await hodService.listStudents({
+            programId: program.id,
+            academicYearId: year.id,
+          });
+          list = filterBySection(parseStudentList(broadRes));
+        }
+        setStudents(list);
       } catch (err) {
         setError(getErrorMessage(err));
       } finally {
@@ -82,13 +97,9 @@ const YearDetail = ({ year, program, dept, onBackToDepartment, onBackToProgram }
       }
     };
     load();
-  }, [year.id, program.id]);
+  }, [section.id, program.id, year.id]);
 
-  const pct = attendance?.attendancePercentage ?? 0;
-  const totalStudents = year._count?.students ?? 0;
-  const totalSessions = attendance?.totalSessions ?? 0;
-  const presentCount = attendance?.presentCount ?? 0;
-  const absentCount = attendance?.absentCount ?? 0;
+  const yearLabel = year.yearNumber ?? year.year;
 
   return (
     <div>
@@ -96,129 +107,128 @@ const YearDetail = ({ year, program, dept, onBackToDepartment, onBackToProgram }
         items={[
           { label: dept.name, onClick: onBackToDepartment },
           { label: program.name, onClick: onBackToProgram },
-          { label: `Year ${year.yearNumber ?? year.year}` },
+          { label: `Year ${yearLabel}`, onClick: onBackToYear },
+          { label: `Section ${section.name}` },
         ]}
       />
 
-      {/* Title */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center">
-          <Layers className="w-6 h-6 text-violet-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">
-            {program.name} — Year {year.yearNumber ?? year.year}
-          </h2>
-          <p className="text-sm text-slate-500">
-            {year.semesterCount ?? 2} Semesters · {dept.name}
-          </p>
-        </div>
-        {attendance && (
-          <div
-            className={`ml-auto px-3 py-1.5 rounded-xl border text-sm font-bold ${attColor(pct)}`}
-          >
-            {pct.toFixed(1)}% Attendance
-          </div>
-        )}
-      </div>
+      <h2 className="text-lg font-bold text-slate-900 mb-4">Section {section.name}</h2>
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader message="Loading year data..." />
+          <Loader message="Loading students..." />
         </div>
       ) : error ? (
         <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-sm text-rose-600 flex gap-2">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {error}
         </div>
+      ) : students.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+          <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No students enrolled in this section.</p>
+        </div>
       ) : (
-        <>
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            <StatBox icon={Users} label="Students Enrolled" value={totalStudents} color="indigo" />
-            <StatBox
-              icon={BarChart2}
-              label="Attendance"
-              value={`${pct.toFixed(1)}%`}
-              color={pct >= 75 ? 'emerald' : pct >= 50 ? 'amber' : 'rose'}
-            />
-            <StatBox icon={BookOpen} label="Sessions Held" value={totalSessions} color="violet" />
-            <StatBox icon={Layers} label="Sections" value={sections.length} color="blue" />
-          </div>
+        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden">
+          {students.map((st) => {
+            const first = st.user?.firstName ?? st.firstName ?? '';
+            const last = st.user?.lastName ?? st.lastName ?? '';
+            const email = st.user?.email ?? st.email ?? '';
+            const name = `${first} ${last}`.trim() || '—';
 
-          {/* Present / Absent breakdown */}
-          {totalSessions > 0 && (
-            <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
-                Attendance Breakdown
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-3 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full transition-all"
-                    style={{ width: `${pct}%` }}
-                  />
+            return (
+              <li
+                key={st.id}
+                className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1"
+              >
+                <div>
+                  <p className="font-medium text-slate-900">{name}</p>
+                  {email && <p className="text-xs text-slate-500">{email}</p>}
                 </div>
-                <span className="text-xs text-emerald-600 font-semibold w-10">
-                  {pct.toFixed(0)}%
+                {st.enrollmentNumber && (
+                  <span className="text-sm font-mono text-slate-600 shrink-0">
+                    {st.enrollmentNumber}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   LEVEL 2 — Year Detail
+══════════════════════════════════════════════════════════════════════ */
+const YearDetail = ({ year, program, dept, onBackToDepartment, onBackToProgram, onSelectSection }) => {
+  const [sections, setSections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const secRes = await hodService.listSections(year.id);
+        setSections(Array.isArray(secRes?.data) ? secRes.data : []);
+      } catch (err) {
+        setError(getErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [year.id]);
+
+  const yearLabel = year.yearNumber ?? year.year;
+
+  return (
+    <div>
+      <Breadcrumb
+        items={[
+          { label: dept.name, onClick: onBackToDepartment },
+          { label: program.name, onClick: onBackToProgram },
+          { label: `Year ${yearLabel}` },
+        ]}
+      />
+
+      <h2 className="text-lg font-bold text-slate-900 mb-4">Year {yearLabel}</h2>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader message="Loading sections..." />
+        </div>
+      ) : error ? (
+        <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-sm text-rose-600 flex gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {error}
+        </div>
+      ) : sections.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+          <Grid className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No sections for this year yet.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {sections.map((sec) => (
+            <button
+              key={sec.id}
+              type="button"
+              onClick={() => onSelectSection(sec)}
+              className="p-4 rounded-xl border border-slate-200 bg-white flex items-center justify-between hover:border-indigo-300 hover:shadow-md transition-all group text-left w-full"
+            >
+              <p className="font-bold text-slate-800">Section {sec.name}</p>
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>
+                  <span className="font-semibold text-slate-900">{sec._count?.students ?? 0}</span>
+                  {' '}Students
                 </span>
+                <ChevronRight className="w-4 h-4 text-indigo-500 group-hover:translate-x-0.5 transition-transform" />
               </div>
-              <div className="flex gap-4 mt-2 text-xs text-slate-500">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                  Present: {presentCount}
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />
-                  Absent: {absentCount}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Sections */}
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
-            Sections
-          </h3>
-          {sections.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              <Grid className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No sections created for this academic year yet.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {sections.map((sec) => {
-                const teacherObj = sec.classTeacher || sec.teacher;
-                const teacherName = teacherObj?.user
-                  ? `${teacherObj.user.firstName || ''} ${teacherObj.user.lastName || ''}`.trim()
-                  : null;
-
-                return (
-                  <div
-                    key={sec.id}
-                    className="p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="font-bold text-slate-800">Section {sec.name}</p>
-                      <span className="text-xs text-slate-400">
-                        {sec._count?.students ?? 0} students
-                      </span>
-                    </div>
-
-                    <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5">
-                      <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Class Teacher:</span>
-                      {teacherName ? (
-                        <span className="font-medium text-slate-700">{teacherName}</span>
-                      ) : (
-                        <span className="text-slate-400 italic">Unassigned</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -227,25 +237,18 @@ const YearDetail = ({ year, program, dept, onBackToDepartment, onBackToProgram }
 /* ══════════════════════════════════════════════════════════════════════
    LEVEL 1 — Program Detail
 ══════════════════════════════════════════════════════════════════════ */
-const ProgramDetail = ({ program, dept, deptAttendance, onBackToDepartment, onSelectYear }) => {
+const ProgramDetail = ({ program, dept, onBackToDepartment, onSelectYear }) => {
   const [years, setYears] = useState([]);
-  const [yearAttendance, setYearAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  const progAtt = (deptAttendance || []).find((a) => a.programId === program.id);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [yrsRes, attRes] = await Promise.all([
-          hodService.listAcademicYears(program.id),
-          hodService.getAcademicYearAttendance({ programId: program.id }).catch(() => ({ data: [] })),
-        ]);
+        const yrsRes = await hodService.listAcademicYears(program.id);
         setYears(Array.isArray(yrsRes?.data) ? yrsRes.data : []);
-        setYearAttendance(Array.isArray(attRes?.data) ? attRes.data : []);
       } catch (err) {
         setError(getErrorMessage(err));
       } finally {
@@ -264,63 +267,7 @@ const ProgramDetail = ({ program, dept, deptAttendance, onBackToDepartment, onSe
         ]}
       />
 
-      {/* Program header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center">
-          <GraduationCap className="w-6 h-6 text-emerald-600" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl font-bold text-slate-900">{program.name}</h2>
-            <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md uppercase">
-              {program.code}
-            </span>
-            <Badge variant={program.isActive !== false ? 'success' : 'error'}>
-              {program.isActive !== false ? 'Active' : 'Inactive'}
-            </Badge>
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {program.durationYears}-year program · {dept.name}
-          </p>
-        </div>
-        {progAtt && (
-          <div
-            className={`ml-auto px-3 py-1.5 rounded-xl border text-sm font-bold ${attColor(
-              progAtt.attendancePercentage
-            )}`}
-          >
-            {Number(progAtt.attendancePercentage).toFixed(1)}% Attendance
-          </div>
-        )}
-      </div>
-
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatBox icon={Layers} label="Total Years" value={program.durationYears} color="indigo" />
-        <StatBox
-          icon={Users}
-          label="Students"
-          value={program._count?.students ?? 0}
-          color="violet"
-        />
-        <StatBox
-          icon={BookOpen}
-          label="Subjects"
-          value={program._count?.subjects ?? 0}
-          color="amber"
-        />
-        <StatBox
-          icon={BarChart2}
-          label="Sessions"
-          value={progAtt?.totalSessions ?? 0}
-          color="emerald"
-        />
-      </div>
-
-      {/* Academic Years */}
-      <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
-        Academic Years — click to view details
-      </h3>
+      <h2 className="text-lg font-bold text-slate-900 mb-4">{program.name}</h2>
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -337,49 +284,18 @@ const ProgramDetail = ({ program, dept, deptAttendance, onBackToDepartment, onSe
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {years.map((year) => {
-            const att = yearAttendance.find((a) => a.academicYearId === year.id);
-            const pct = att?.attendancePercentage ?? 0;
-            const students = year._count?.students ?? 0;
-            const sections = year._count?.sections ?? year.sections?.length ?? 0;
-
-            return (
-              <button
-                key={year.id}
-                onClick={() => onSelectYear(year, yearAttendance)}
-                className="text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white group"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center group-hover:bg-violet-100 transition-colors">
-                    <Layers className="w-5 h-5 text-violet-500" />
-                  </div>
-                  <span className={`px-2 py-1 rounded-lg border text-xs font-bold ${attColor(pct)}`}>
-                    {pct.toFixed(1)}%
-                  </span>
-                </div>
-
-                <p className="font-bold text-slate-800">
-                  Year {year.yearNumber ?? year.year}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {year.semesterCount ?? 2} Semesters
-                </p>
-
-                <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <Users className="w-3 h-3 text-indigo-400" /> {students} Students
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Layers className="w-3 h-3 text-violet-400" /> {sections} Sections
-                  </span>
-                </div>
-
-                <div className="mt-2 flex items-center gap-1 text-xs text-indigo-500 font-medium group-hover:gap-2 transition-all">
-                  View details <ChevronRight className="w-3 h-3" />
-                </div>
-              </button>
-            );
-          })}
+          {years.map((year) => (
+            <button
+              key={year.id}
+              onClick={() => onSelectYear(year)}
+              className="text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white group flex items-center justify-between"
+            >
+              <p className="font-bold text-slate-800">
+                Year {year.yearNumber ?? year.year}
+              </p>
+              <ChevronRight className="w-4 h-4 text-indigo-500 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -399,10 +315,11 @@ const Departments = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // navigation stack: 'dept' | 'program' | 'year'
+  // navigation stack: 'dept' | 'program' | 'year' | 'section'
   const [view, setView] = useState('dept');
   const [selectedProgram, setSelectedProgram] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
+  const [selectedSection, setSelectedSection] = useState(null);
 
   useEffect(() => {
     fetchDepartmentData();
@@ -437,23 +354,37 @@ const Departments = () => {
   const goToProgram = (prog) => {
     setSelectedProgram(prog);
     setSelectedYear(null);
+    setSelectedSection(null);
     setView('program');
   };
 
   const goToYear = (year) => {
     setSelectedYear(year);
+    setSelectedSection(null);
     setView('year');
+  };
+
+  const goToSection = (section) => {
+    setSelectedSection(section);
+    setView('section');
   };
 
   const goToDepartment = () => {
     setView('dept');
     setSelectedProgram(null);
     setSelectedYear(null);
+    setSelectedSection(null);
   };
 
   const goBackToProgram = () => {
     setSelectedYear(null);
+    setSelectedSection(null);
     setView('program');
+  };
+
+  const goBackToYear = () => {
+    setSelectedSection(null);
+    setView('year');
   };
 
   if (loading) return <Loader fullPage message="Loading your department details..." />;
@@ -469,9 +400,6 @@ const Departments = () => {
   const hodEmail = department?.hod?.email || user?.email || '';
 
   const totalStudents = summaryStats?.totalStudents ?? department?._count?.students ?? 0;
-  const overallPercentage = summaryStats?.overallPercentage != null
-    ? parseFloat(summaryStats.overallPercentage).toFixed(1)
-    : '—';
 
   return (
     <div className="p-6 space-y-6">
@@ -508,19 +436,19 @@ const Departments = () => {
               </div>
 
               {/* High-level department metrics */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center min-w-[100px]">
-                  <p className="text-xs text-indigo-200 font-medium">Programs</p>
+              <div className="grid grid-cols-3 gap-3 min-w-[260px]">
+                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center">
+                  <p className="text-xs text-indigo-200 font-medium">Total Programs</p>
                   <p className="text-xl sm:text-2xl font-bold mt-1">{programs.length}</p>
                 </div>
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center min-w-[100px]">
-                  <p className="text-xs text-indigo-200 font-medium">Students</p>
+                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center">
+                  <p className="text-xs text-indigo-200 font-medium">Total Students</p>
                   <p className="text-xl sm:text-2xl font-bold mt-1">{totalStudents}</p>
                 </div>
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center min-w-[100px] col-span-2 sm:col-span-1">
-                  <p className="text-xs text-indigo-200 font-medium">Attendance</p>
+                <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/10 text-center">
+                  <p className="text-xs text-indigo-200 font-medium">Total Teachers</p>
                   <p className="text-xl sm:text-2xl font-bold mt-1">
-                    {overallPercentage !== '—' ? `${overallPercentage}%` : '—'}
+                    {department?._count?.teachers ?? 0}
                   </p>
                 </div>
               </div>
@@ -619,7 +547,6 @@ const Departments = () => {
         <ProgramDetail
           program={selectedProgram}
           dept={{ name: deptName }}
-          deptAttendance={deptAttendance}
           onBackToDepartment={goToDepartment}
           onSelectYear={goToYear}
         />
@@ -633,6 +560,20 @@ const Departments = () => {
           dept={{ name: deptName }}
           onBackToDepartment={goToDepartment}
           onBackToProgram={goBackToProgram}
+          onSelectSection={goToSection}
+        />
+      )}
+
+      {/* ── LEVEL 3: Section Detail (Students) ─────────────────────── */}
+      {view === 'section' && selectedSection && selectedYear && selectedProgram && (
+        <SectionDetail
+          section={selectedSection}
+          year={selectedYear}
+          program={selectedProgram}
+          dept={{ name: deptName }}
+          onBackToDepartment={goToDepartment}
+          onBackToProgram={goBackToProgram}
+          onBackToYear={goBackToYear}
         />
       )}
     </div>

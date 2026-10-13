@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, Plus, Edit2 } from 'lucide-react';
+import { Layers, Plus, Edit2, Trash2, AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -25,6 +26,11 @@ const AcademicYears = () => {
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingYear, setEditingYear] = useState(null);
+
+  // Delete Modal
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [yearToDelete, setYearToDelete] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Form
   const [formData, setFormData] = useState({ yearNumber: '', semesterCount: '2' });
@@ -91,8 +97,11 @@ const AcademicYears = () => {
     try {
       if (editingYear) {
         await hodService.updateAcademicYear(editingYear.id, {
+          yearNumber: Number(formData.yearNumber),
+          semesterCount: Number(formData.semesterCount),
           label: `Year ${formData.yearNumber}`,
         });
+        toast.success(`Academic Year ${formData.yearNumber} updated successfully`);
       } else {
         await hodService.createAcademicYear({
           programId: selectedProgramId,
@@ -100,6 +109,7 @@ const AcademicYears = () => {
           semesterCount: Number(formData.semesterCount),
           label: `Year ${formData.yearNumber}`,
         });
+        toast.success(`Academic Year ${formData.yearNumber} created successfully`);
       }
       setIsModalOpen(false);
       fetchAcademicYears(selectedProgramId);
@@ -107,6 +117,27 @@ const AcademicYears = () => {
       setFormError(getErrorMessage(err));
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  const handleOpenDeleteModal = (year) => {
+    setYearToDelete(year);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!yearToDelete) return;
+    setDeleteLoading(true);
+    try {
+      await hodService.deleteAcademicYear(yearToDelete.id);
+      toast.success(`Academic Year ${yearToDelete.yearNumber ?? yearToDelete.year} deleted successfully`);
+      setIsDeleteModalOpen(false);
+      setYearToDelete(null);
+      fetchAcademicYears(selectedProgramId);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to delete academic year'));
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -124,20 +155,28 @@ const AcademicYears = () => {
       )
     },
     {
-      header: 'Sections',
-      render: (row) => row._count?.sections ?? 0
-    },
-    {
       header: 'Actions',
       render: (row) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => handleOpenModal(row)}
-          className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-        >
-          <Edit2 className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleOpenModal(row)}
+            className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-2 h-8 w-8"
+            title="Edit Academic Year"
+          >
+            <Edit2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleOpenDeleteModal(row)}
+            className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 p-2 h-8 w-8"
+            title="Delete Academic Year"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
       )
     }
   ];
@@ -250,6 +289,45 @@ const AcademicYears = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => !deleteLoading && setIsDeleteModalOpen(false)}
+        title="Delete Academic Year"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-600" />
+            <div className="text-xs space-y-1">
+              <p className="font-semibold text-rose-900">Are you sure you want to delete this academic year?</p>
+              <p>
+                <strong>Year {yearToDelete?.yearNumber ?? yearToDelete?.year}</strong> ({yearToDelete?.semesterCount ?? 2} Semesters) will be permanently deleted.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDeleteConfirm}
+              isLoading={deleteLoading}
+              className="bg-rose-600 hover:bg-rose-700 text-white font-semibold"
+            >
+              Delete Academic Year
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

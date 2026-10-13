@@ -51,3 +51,61 @@ body {
 .qr-container {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
+
+/* ==========================================================================
+   PRINT STYLES – Normal Official Attendance Sheet
+   ========================================================================== */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm;
+  }
+
+  /* Hide all app chrome, layout header, sidebar, navigation, buttons, search */
+  header,
+  aside,
+  nav,
+  button,
+  .print-hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Reset layout constraints so report uses full paper width */
+  main,
+  div,
+  section {
+    max-width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  /* Ensure formal print sheet is visible */
+  .normal-print-sheet {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Screen-only interactive UI elements are hidden during print */
+  .screen-only-report {
+    display: none !important;
+  }
+}
+
+@media screen {
+  .normal-print-sheet {
+    display: none !important;
+  }
+}

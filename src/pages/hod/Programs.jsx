@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, Edit2 } from 'lucide-react';
+import { BookOpen, Plus, Edit2, Trash2, AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -20,6 +21,11 @@ const Programs = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProgram, setEditingProgram] = useState(null);
 
+  // Delete Modal
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [programToDelete, setProgramToDelete] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // Form
   const [formData, setFormData] = useState({ name: '', code: '' });
   const [formLoading, setFormLoading] = useState(false);
@@ -33,7 +39,6 @@ const Programs = () => {
     setLoading(true);
     try {
       const res = await hodService.listPrograms();
-      // API: { success, data: [...programs] }
       const list = Array.isArray(res?.data) ? res.data : (res?.data?.programs ?? res?.programs ?? []);
       setPrograms(list);
     } catch (err) {
@@ -62,8 +67,10 @@ const Programs = () => {
     try {
       if (editingProgram) {
         await hodService.updateProgram(editingProgram.id, formData);
+        toast.success('Program updated successfully');
       } else {
         await hodService.createProgram(formData);
+        toast.success('Program created successfully');
       }
       setIsModalOpen(false);
       fetchPrograms();
@@ -71,6 +78,27 @@ const Programs = () => {
       setFormError(getErrorMessage(err));
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  const handleOpenDeleteModal = (prog) => {
+    setProgramToDelete(prog);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!programToDelete) return;
+    setDeleteLoading(true);
+    try {
+      await hodService.deleteProgram(programToDelete.id);
+      toast.success(`Program '${programToDelete.name}' deleted successfully`);
+      setIsDeleteModalOpen(false);
+      setProgramToDelete(null);
+      fetchPrograms();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to delete program'));
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -90,20 +118,28 @@ const Programs = () => {
       )
     },
     {
-      header: 'Academic Years',
-      render: (row) => row._count?.academicYears ?? 0
-    },
-    {
       header: 'Actions',
       render: (row) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => handleOpenModal(row)}
-          className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-        >
-          <Edit2 className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleOpenModal(row)}
+            className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-2 h-8 w-8"
+            title="Edit Program"
+          >
+            <Edit2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleOpenDeleteModal(row)}
+            className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 p-2 h-8 w-8"
+            title="Delete Program"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
       )
     }
   ];
@@ -112,7 +148,7 @@ const Programs = () => {
   if (error) return <div className="p-6"><ErrorState message={error} onRetry={fetchPrograms} /></div>;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Programs</h1>
@@ -139,6 +175,7 @@ const Programs = () => {
         </CardContent>
       </Card>
 
+      {/* Create / Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => !formLoading && setIsModalOpen(false)}
@@ -181,6 +218,45 @@ const Programs = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => !deleteLoading && setIsDeleteModalOpen(false)}
+        title="Delete Program"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-600" />
+            <div className="text-xs space-y-1">
+              <p className="font-semibold text-rose-900">Are you sure you want to delete this program?</p>
+              <p>
+                <strong>{programToDelete?.name}</strong> ({programToDelete?.code}) will be permanently deleted.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDeleteConfirm}
+              isLoading={deleteLoading}
+              className="bg-rose-600 hover:bg-rose-700 text-white font-semibold"
+            >
+              Delete Program
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

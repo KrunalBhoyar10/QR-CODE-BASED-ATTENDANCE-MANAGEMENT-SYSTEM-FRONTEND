@@ -51,6 +51,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        // Face photos and other uploaded files served by the backend
+        '/uploads': {
+          target: proxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
   };

@@ -26,7 +26,6 @@ import PrincipalAttendance from '../pages/principal/Attendance';
 import PrincipalReports from '../pages/principal/Reports';
 
 // HOD pages
-import HodDashboard from '../pages/hod/Dashboard';
 import HodDepartments from '../pages/hod/Departments';
 import HodPrograms from '../pages/hod/Programs';
 import HodAcademicYears from '../pages/hod/AcademicYears';
@@ -42,9 +41,10 @@ import HodReports from '../pages/hod/Reports';
 import TeacherDashboard from '../pages/teacher/TeacherDashboard';
 import TeacherStudents from '../pages/teacher/Students';
 import TeacherSummary from '../pages/teacher/AttendanceSummary';
+import FaceAuthorization from '../pages/teacher/FaceAuthorization';
+import TeacherReports from '../pages/teacher/TeacherReports';
 
 // Student pages
-import StudentDashboard from '../pages/student/StudentDashboard';
 import ScanAttendance from '../pages/student/ScanAttendance';
 import MyAttendance from '../pages/student/MyAttendance';
 import SubjectAttendance from '../pages/student/SubjectAttendance';
@@ -66,6 +66,11 @@ function StudentRegisterStandalone() {
       onBackToLogin={() => navigate('/login', { replace: true })}
     />
   );
+}
+
+// HOD dashboard removed from nav — legacy URL redirects to Department
+function HodDashboard() {
+  return <Navigate to="/hod/department" replace />;
 }
 
 // ─── Helper: root path redirector ────────────────────────────────────────────
@@ -140,6 +145,7 @@ export function AppRoutes() {
 
           {/* HOD */}
           <Route path="/hod">
+            <Route index element={<Navigate to="/hod/department" replace />} />
             <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.HOD]}>
                 <HodDashboard />
@@ -219,13 +225,23 @@ export function AppRoutes() {
                 <TeacherSummary />
               </RoleRoute>
             } />
+            <Route path="face-authorization" element={
+              <RoleRoute allowedRoles={[ROLES.TEACHER]}>
+                <FaceAuthorization />
+              </RoleRoute>
+            } />
+            <Route path="reports" element={
+              <RoleRoute allowedRoles={[ROLES.TEACHER]}>
+                <TeacherReports />
+              </RoleRoute>
+            } />
           </Route>
 
           {/* Student */}
           <Route path="/student">
             <Route path="dashboard" element={
               <RoleRoute allowedRoles={[ROLES.STUDENT]}>
-                <StudentDashboard />
+                <Navigate to="/student/scan" replace />
               </RoleRoute>
             } />
             <Route path="scan" element={

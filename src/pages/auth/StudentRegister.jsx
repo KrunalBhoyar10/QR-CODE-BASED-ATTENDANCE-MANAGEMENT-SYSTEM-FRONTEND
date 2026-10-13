@@ -11,11 +11,16 @@ import {
   BookOpen,
   Loader2,
   ShieldCheck,
+  Camera,
 } from 'lucide-react';
 import { Button, Input, Select } from '../../components/ui';
 import { authService } from '../../services/auth.service';
+import studentService from '../../services/student.service';
 import registrationService from '../../services/registration.service';
 import { getErrorMessage } from '../../utils/error';
+import { filterActiveSubjects } from '../../utils/subjects';
+import { serializeDescriptor } from '../../services/face.service';
+import FaceCapture from '../../components/FaceCapture';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Multi-step registration wizard
@@ -27,7 +32,8 @@ import { getErrorMessage } from '../../utils/error';
 const STEPS = {
   PERSONAL: 1,
   ACADEMIC: 2,
-  SUCCESS: 3,
+  FACE:     3,
+  SUCCESS:  4,
 };
 
 const PASSWORD_MIN_LENGTH = 8;
@@ -91,6 +97,16 @@ export const StudentRegister = ({ onBackToLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // ── Face state (Step 3) ──────────────────────────────────────────────────
+  const [faceDescriptor, setFaceDescriptor] = useState(null);
+  const [faceImageDataUrl, setFaceImageDataUrl] = useState(null);
+  const [faceSaving, setFaceSaving] = useState(false);
+  const [faceError, setFaceError] = useState('');
+  const [faceSkipped, setFaceSkipped] = useState(false);
+
+  // Track registeredStudentId for face upload after registration
+  const [registeredStudentId, setRegisteredStudentId] = useState(null);
 
   // ─── Load programs on Academic step entry ─────────────────────────────────
   const loadPrograms = useCallback(() => {
@@ -180,10 +196,11 @@ export const StudentRegister = ({ onBackToLogin }) => {
     registrationService
       .getSubjects(selectedSection)
       .then((data) => {
-        setSubjects(data);
-        // Auto-select all compulsory subjects
-        const compulsory = data
-          .filter((s) => s.isCompulsory || s.subjectType === 'COMPULSORY')
+        const active = filterActiveSubjects(Array.isArray(data) ? data : []);
+        setSubjects(active);
+        // Auto-select only compulsory subjects; student picks electives manually
+        const compulsory = active
+          .filter((s) => s.isCompulsory || s.subjectType === 'COMPULSORY' || s.subjectType === 'COMMON')
           .map((s) => s.id);
         setSelectedSubjects(compulsory);
       })
@@ -231,22 +248,11 @@ export const StudentRegister = ({ onBackToLogin }) => {
     if (!selectedSection) errs.section = 'Please select a section.';
 
     const compulsoryIds = subjects
-      .filter((s) => s.isCompulsory || s.subjectType === 'COMPULSORY')
+      .filter((s) => s.isCompulsory || s.subjectType === 'COMPULSORY' || s.subjectType === 'COMMON')
       .map((s) => s.id);
     const missingCompulsory = compulsoryIds.filter((id) => !selectedSubjects.includes(id));
     if (missingCompulsory.length > 0) {
       errs.subjects = 'All compulsory subjects must be selected.';
-    }
-
-    const electiveSubjects = subjects.filter(
-      (s) => !s.isCompulsory && s.subjectType !== 'COMPULSORY'
-    );
-    const selectedElectiveCount = selectedSubjects.filter((id) =>
-      electiveSubjects.some((s) => s.id === id)
-    ).length;
-
-    if (electiveSubjects.length > 0 && selectedElectiveCount === 0) {
-      errs.subjects = (errs.subjects ? errs.subjects + ' ' : '') + 'Please select at least one elective.';
     }
 
     setFieldErrors(errs);
@@ -271,8 +277,20 @@ export const StudentRegister = ({ onBackToLogin }) => {
         password,
       });
 
-      // Registration is complete — account is active immediately (no OTP step).
-      setStep(STEPS.SUCCESS);
+      // Auto-login so the face upload endpoint has a valid token
+      try {
+        await authService.login({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+      } catch (_) {
+        // Login failed silently — skip face step, go straight to success
+        setStep(STEPS.SUCCESS);
+        return;
+      }
+
+      // Registration + login complete — move to face step
+      setStep(STEPS.FACE);
     } catch (err) {
       setErrorMessage(getErrorMessage(err, 'Registration failed. Please check your details and try again.'));
     } finally {
@@ -286,7 +304,7 @@ export const StudentRegister = ({ onBackToLogin }) => {
     if (!subject) return;
 
     // Compulsory subjects cannot be deselected
-    if (subject.isCompulsory || subject.subjectType === 'COMPULSORY') return;
+    if (subject.isCompulsory || subject.subjectType === 'COMPULSORY' || subject.subjectType === 'COMMON') return;
 
     setSelectedSubjects((prev) =>
       prev.includes(subjectId)
@@ -327,7 +345,7 @@ export const StudentRegister = ({ onBackToLogin }) => {
 
   const StepIndicator = () => (
     <div className="flex items-center justify-center gap-1.5 mb-5">
-      {[STEPS.PERSONAL, STEPS.ACADEMIC].map((s) => (
+      {[STEPS.PERSONAL, STEPS.ACADEMIC, STEPS.FACE].map((s) => (
         <div
           key={s}
           className={`h-1.5 rounded-full transition-all duration-300 ${
@@ -497,10 +515,10 @@ export const StudentRegister = ({ onBackToLogin }) => {
   // ─────────────────────────────────────────────────────────────────────────
   if (step === STEPS.ACADEMIC) {
     const compulsorySubjects = subjects.filter(
-      (s) => s.isCompulsory || s.subjectType === 'COMPULSORY'
+      (s) => s.isCompulsory || s.subjectType === 'COMPULSORY' || s.subjectType === 'COMMON'
     );
     const electiveSubjects = subjects.filter(
-      (s) => !s.isCompulsory && s.subjectType !== 'COMPULSORY'
+      (s) => !s.isCompulsory && s.subjectType !== 'COMPULSORY' && s.subjectType !== 'COMMON'
     );
 
     const programOptions = programs.map((p) => ({
@@ -536,7 +554,7 @@ export const StudentRegister = ({ onBackToLogin }) => {
 
         <StepIndicator />
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-3">
-          Step 2 of 2 — Academic Details
+          Step 2 of 3 — Academic Details
         </p>
 
         <ErrorBanner
@@ -639,26 +657,19 @@ export const StudentRegister = ({ onBackToLogin }) => {
                 <span className="text-rose-500 ml-1">*</span>
               </p>
 
-              {/* Compulsory subjects */}
+              {/* Compulsory (Common) subjects — no checkbox, auto-included */}
               {compulsorySubjects.length > 0 && (
                 <div className="mb-2">
                   <p className="text-[10px] font-semibold uppercase text-emerald-700 mb-1.5 flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3" />
-                    Compulsory ({compulsorySubjects.length})
+                    Compulsory — included automatically ({compulsorySubjects.length})
                   </p>
                   <div className="space-y-1">
                     {compulsorySubjects.map((subject) => (
-                      <label
+                      <div
                         key={subject.id}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 cursor-default"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50"
                       >
-                        <input
-                          type="checkbox"
-                          checked
-                          readOnly
-                          className="w-3.5 h-3.5 accent-emerald-600"
-                          aria-label={`${subject.name} (compulsory, cannot deselect)`}
-                        />
                         <span className="text-xs text-slate-700 font-medium flex-1">
                           {subject.name}
                           {subject.code && (
@@ -668,17 +679,17 @@ export const StudentRegister = ({ onBackToLogin }) => {
                           )}
                         </span>
                         <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded">
-                          Compulsory
+                          Common
                         </span>
-                      </label>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Elective subjects */}
+              {/* Elective subjects — student can select */}
               {electiveSubjects.length > 0 && (
-                <div>
+                <div className="mb-2">
                   <p className="text-[10px] font-semibold uppercase text-indigo-700 mb-1.5 flex items-center gap-1">
                     <BookOpen className="w-3 h-3" />
                     Electives — select applicable ({electiveSubjects.length} available)
@@ -741,7 +752,7 @@ export const StudentRegister = ({ onBackToLogin }) => {
               onClick={handleRegisterSubmit}
               disabled={isLoading || loadingPrograms || loadingYears || loadingSections || loadingSubjects}
             >
-              {isLoading ? 'Registering…' : 'Submit Registration'}
+              {isLoading ? 'Registering…' : 'Continue to Face Registration'}
             </Button>
           </div>
         </div>
@@ -750,7 +761,87 @@ export const StudentRegister = ({ onBackToLogin }) => {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // STEP 3: Success
+  // STEP 3: Face Photo Registration (optional but recommended)
+  // ─────────────────────────────────────────────────────────────────────────
+  if (step === STEPS.FACE) {
+    const handleFaceCaptured = async ({ descriptor, imageDataUrl }) => {
+      setFaceError('');
+      setFaceSaving(true);
+      try {
+        const res   = await fetch(imageDataUrl);
+        const blob  = await res.blob();
+        const file  = new File([blob], 'face_photo.jpg', { type: 'image/jpeg' });
+        const form  = new FormData();
+        form.append('facePhoto', file);
+        form.append('faceDescriptor', JSON.stringify(serializeDescriptor(descriptor)));
+        await studentService.registerFace(form);
+        setStep(STEPS.SUCCESS);
+      } catch (e) {
+        // If endpoint not yet implemented (404/501), silently skip
+        if (e?.response?.status === 404 || e?.response?.status === 501) {
+          setStep(STEPS.SUCCESS);
+        } else {
+          setFaceError(getErrorMessage(e, 'Failed to save face photo. You can do this later from your Profile.'));
+        }
+      } finally {
+        setFaceSaving(false);
+      }
+    };
+
+    return (
+      <div>
+        <div className="mb-5">
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-indigo-600" />
+            Face Verification Setup
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Register your face photo to enable face verification during QR attendance.
+          </p>
+        </div>
+
+        <StepIndicator />
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-4">
+          Step 3 of 3 — Face Photo (Recommended)
+        </p>
+
+        {faceError && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200/80 text-xs text-rose-800 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <span>{faceError}</span>
+          </div>
+        )}
+
+        {faceSaving ? (
+          <div className="flex flex-col items-center gap-3 py-8 text-slate-500">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            <p className="text-sm">Saving face photo…</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <FaceCapture
+              onCapture={handleFaceCaptured}
+              onError={(msg) => setFaceError(msg)}
+              onCancel={null}
+              compact={false}
+            />
+            <div className="border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setStep(STEPS.SUCCESS)}
+                className="w-full text-center text-xs text-slate-400 hover:text-indigo-600 transition-colors"
+              >
+                Skip for now — I'll add my face photo from my Profile later
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STEP 4: Success
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="text-center py-4">

@@ -6,6 +6,7 @@ import {
   Check, Eye, ArrowLeft, Award, FileText, GraduationCap, Calendar, Compass,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { isValidCoordinatePair, normalizeLatLng } from '../../utils/geolocation';
 import { useAuth } from '../../hooks/useAuth';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -80,7 +81,7 @@ export const TeacherDashboard = () => {
     latitude: null,
     longitude: null,
     accuracy: null,
-    faceVerificationRequired: false,
+    faceVerificationRequired: true,
   });
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [locationError, setLocationError] = useState('');
@@ -98,6 +99,7 @@ export const TeacherDashboard = () => {
   const [liveAttendanceRecords, setLiveAttendanceRecords] = useState([]);
   const [liveSummary, setLiveSummary] = useState(null);
   const [closingSession, setClosingSession] = useState(false);
+  const closingSessionRef = useRef(false);
 
   // Final Summary View State
   const [completedSummary, setCompletedSummary] = useState(null);
@@ -170,8 +172,10 @@ export const TeacherDashboard = () => {
       if (res?.data) {
         setLiveAttendanceRecords(Array.isArray(res.data) ? res.data : []);
       }
-      if (res?.summary) {
-        setLiveSummary(res.summary);
+      // summary is inside pagination object
+      const summary = res?.pagination?.summary || res?.summary;
+      if (summary) {
+        setLiveSummary(summary);
       }
     } catch (err) {
       // silent poll
@@ -265,8 +269,14 @@ export const TeacherDashboard = () => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setDetectingLocation(false);
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
+        const normalized = normalizeLatLng(pos.coords.latitude, pos.coords.longitude);
+        if (!normalized) {
+          const msg = 'Invalid GPS reading. Please try again in the classroom with location enabled.';
+          setLocationError(msg);
+          toast.error(msg);
+          return;
+        }
+        const { latitude: lat, longitude: lng } = normalized;
         const acc = pos.coords.accuracy;
 
         setSessionConfig((prev) => ({
@@ -322,8 +332,20 @@ export const TeacherDashboard = () => {
     const timeStr = sessionConfig.startTime || getCurrentTimeString();
     const startDateTime = new Date(`${dateStr}T${timeStr}:00`);
 
+    if (sessionConfig.enableGps) {
+      if (!isValidCoordinatePair(sessionConfig.latitude, sessionConfig.longitude)) {
+        toast.error('Detect classroom GPS in the room before starting a geofenced session.');
+        return;
+      }
+    }
+
     setCreatingSession(true);
     try {
+      const geo =
+        sessionConfig.enableGps && sessionConfig.latitude != null
+          ? normalizeLatLng(sessionConfig.latitude, sessionConfig.longitude)
+          : null;
+
       const payload = {
         teachingAssignmentId: assignmentId,
         subjectId: selectedSubject.subjectId || selectedSubject.id,
@@ -335,8 +357,10 @@ export const TeacherDashboard = () => {
         startTime: startDateTime.toISOString(),
         durationMinutes: durationMins,
         allowedRadius: sessionConfig.enableGps ? (Number(sessionConfig.allowedRadius) || 100) : undefined,
-        latitude: sessionConfig.enableGps && sessionConfig.latitude != null ? Number(sessionConfig.latitude) : undefined,
-        longitude: sessionConfig.enableGps && sessionConfig.longitude != null ? Number(sessionConfig.longitude) : undefined,
+        latitude: geo?.latitude,
+        longitude: geo?.longitude,
+        lat: geo?.latitude,
+        lng: geo?.longitude,
         faceVerificationRequired: sessionConfig.faceVerificationRequired,
       };
 
@@ -366,27 +390,106 @@ export const TeacherDashboard = () => {
 
   // ── Close Session (Step 5 -> Step 6) ─────────────────────────────────────────
   const finishSession = async (sessionId) => {
+    if (closingSessionRef.current) return;
+
     const targetSessionId = sessionId || activeSession?.id;
     if (!targetSessionId) {
       toast.error('No active session found to close');
       return;
     }
 
+    closingSessionRef.current = true;
     setClosingSession(true);
     try {
-      await teacherService.closeSession(targetSessionId);
-
-      let finalAttendance = null;
+      // Step 1: Close the session (fast — just a status update)
+      // Retry once on 500 in case of a transient backend error
+      let closeResponse;
       try {
-        finalAttendance = await teacherService.getSessionAttendance(targetSessionId, { page: 1, limit: 100 });
+        closeResponse = await teacherService.closeSession(targetSessionId);
+      } catch (closeErr) {
+        const status = closeErr?.response?.status;
+        if (status === 500 || status === 503) {
+          toast.loading('Server busy, retrying…', { id: 'retry-close' });
+          await new Promise(r => setTimeout(r, 1500));
+          toast.dismiss('retry-close');
+          closeResponse = await teacherService.closeSession(targetSessionId);
+        } else {
+          throw closeErr;
+        }
+      }
+      setActiveSession((current) => current && ({
+        ...current,
+        status: closeResponse?.data?.status || 'ENDED',
+      }));
+      setQrCodeData('');
+      setQrPayloadRaw('');
+      setIsFullscreenQr(false);
+
+      // Step 2: Fetch session detail + attendance in parallel
+      let finalAttendance = null;
+      let sessionDetail   = null;
+      try {
+        [sessionDetail, finalAttendance] = await Promise.all([
+          teacherService.getSessionById(targetSessionId).catch(() => null),
+          teacherService.getSessionAttendance(targetSessionId, { page: 1, limit: 100 }).catch(() => null),
+        ]);
       } catch (attErr) {
         console.warn('Could not fetch final attendance records:', attErr);
       }
 
+      // API shapes:
+      //   getSessionById:      { data: { session, attendanceSummary } }
+      //   getSessionAttendance: { data: [...records], pagination: { summary: {...} } }
+      const fetchedRecords = Array.isArray(finalAttendance?.data) ? finalAttendance.data : [];
+      let finalRecords = fetchedRecords.length > 0 ? fetchedRecords : liveAttendanceRecords;
+
+      if (finalRecords.length === 0) {
+        try {
+          await new Promise(r => setTimeout(r, 800));
+          const retry = await teacherService.getSessionAttendance(targetSessionId, { page: 1, limit: 100 }).catch(() => null);
+          if (Array.isArray(retry?.data) && retry.data.length > 0) {
+            finalRecords = retry.data;
+          }
+        } catch { /* silent */ }
+      }
+      const finalSummary = sessionDetail?.data?.attendanceSummary
+        || finalAttendance?.pagination?.summary
+        || liveSummary;
+
+      // Build full student list with PRESENT/ABSENT status
+      // finalRecords only contains students who scanned (PRESENT).
+      // We need to merge with all section students to show absent ones too.
+      let allStudentRecords = finalRecords;
+      try {
+        const sectionId = (sessionDetail?.data?.session || activeSession)?.sectionId
+          || (sessionDetail?.data?.session || activeSession)?.section?.id;
+        if (sectionId) {
+          const sectionRes = await teacherService.getSectionStudents(sectionId).catch(() => null);
+          const allStudents = sectionRes?.data?.students || sectionRes?.students
+            || (Array.isArray(sectionRes?.data) ? sectionRes.data : []);
+          if (allStudents.length > 0) {
+            const presentIds = new Set(finalRecords.map(r => r.studentId));
+            const absentRows = allStudents
+              .filter(s => !presentIds.has(s.id))
+              .map(s => ({
+                id:          `absent-${s.id}`,
+                studentId:   s.id,
+                studentName: `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim() || 'Unknown',
+                email:       s.user?.email || '',
+                enrollmentNumber: s.enrollmentNumber || '',
+                status:      'ABSENT',
+                markedAt:    null,
+                markedVia:   null,
+              }));
+            allStudentRecords = [...finalRecords, ...absentRows];
+          }
+        }
+      } catch { /* non-fatal — show what we have */ }
+
       setCompletedSummary({
-        session: activeSession || finalAttendance?.data?.session,
-        summary: finalAttendance?.summary || liveSummary,
-        records: Array.isArray(finalAttendance?.data) ? finalAttendance.data : liveAttendanceRecords,
+        session: sessionDetail?.data?.session || activeSession || {},
+        summary: finalSummary,
+        records: allStudentRecords,
       });
 
       setActiveSession(null);
@@ -397,6 +500,7 @@ export const TeacherDashboard = () => {
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to close session'));
     } finally {
+      closingSessionRef.current = false;
       setClosingSession(false);
     }
   };
@@ -850,8 +954,7 @@ export const TeacherDashboard = () => {
                             </div>
                           </div>
                           <div className="text-right font-mono text-slate-600">
-                            <div>Roll: <strong className="text-slate-800">{st.rollNumber || '—'}</strong></div>
-                            <div className="text-[10px] text-slate-400">{st.enrollmentNumber || ''}</div>
+                            <div>{st.enrollmentNumber || ''}</div>
                           </div>
                         </div>
                       ))}
@@ -952,6 +1055,26 @@ export const TeacherDashboard = () => {
                   <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5 cursor-pointer">
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        Face Verification Required
+                      </label>
+                      <input
+                        type="checkbox"
+                        checked={sessionConfig.faceVerificationRequired}
+                        onChange={(e) => setSessionConfig((prev) => ({ ...prev, faceVerificationRequired: e.target.checked }))}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-400 cursor-pointer"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {sessionConfig.faceVerificationRequired
+                        ? 'Students must pass live face verification to mark attendance.'
+                        : 'Face verification is disabled for this session.'}
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5 cursor-pointer">
                         <Compass className="w-4 h-4 text-indigo-600" />
                         GPS Geofence Verification
                       </label>
@@ -1041,9 +1164,9 @@ export const TeacherDashboard = () => {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-                <h2 className="text-lg font-bold text-slate-900">Attendance Session Active</h2>
-                <Badge variant="success">LIVE</Badge>
+                <span className={`w-2.5 h-2.5 rounded-full ${activeSession.status === 'ENDED' ? 'bg-slate-400' : 'bg-emerald-500 animate-ping'}`} />
+                <h2 className="text-lg font-bold text-slate-900">{activeSession.status === 'ENDED' ? 'Attendance Session Ended' : 'Attendance Session Active'}</h2>
+                <Badge variant="success">{activeSession.status === 'ENDED' ? 'ENDED' : 'LIVE'}</Badge>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {activeSession.subject?.name || selectedSubject?.subjectName} • Section {activeSession.section?.name || selectedSection?.sectionName}
@@ -1064,9 +1187,10 @@ export const TeacherDashboard = () => {
                 size="sm"
                 onClick={() => finishSession(activeSession?.id)}
                 isLoading={closingSession}
+                disabled={activeSession.status === 'ENDED'}
                 leftIcon={<StopCircle className="w-4 h-4" />}
               >
-                End Session
+                {activeSession.status === 'ENDED' ? 'Session Ended' : 'End Session'}
               </Button>
             </div>
           </div>
@@ -1149,7 +1273,7 @@ export const TeacherDashboard = () => {
                     <div key={rec.id} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
                       <div>
                         <p className="font-bold text-slate-800">{rec.studentName}</p>
-                        <p className="text-[11px] text-slate-400">Roll: {rec.rollNumber} • {rec.email}</p>
+                        <p className="text-[11px] text-slate-400">{rec.enrollmentNumber || rec.email}</p>
                       </div>
                       <div className="text-right">
                         <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
@@ -1198,30 +1322,20 @@ export const TeacherDashboard = () => {
 
           {/* Summary Stat Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatBox
-              icon={Users}
-              label="Total Section Students"
-              value={completedSummary.summary?.totalStudents ?? completedSummary.records?.length ?? 0}
-              color="indigo"
-            />
-            <StatBox
-              icon={CheckCircle2}
-              label="Present Students"
-              value={completedSummary.summary?.presentCount ?? completedSummary.records?.filter((r) => r.status === 'PRESENT').length ?? 0}
-              color="emerald"
-            />
-            <StatBox
-              icon={XCircle}
-              label="Absent Students"
-              value={completedSummary.summary?.absentCount ?? 0}
-              color="rose"
-            />
-            <StatBox
-              icon={Award}
-              label="Overall Attendance %"
-              value={`${completedSummary.summary?.attendancePercentage ?? 0}%`}
-              color="violet"
-            />
+            {(() => {
+              const presentRecords = (completedSummary.records || []).filter(r => r.status === 'PRESENT');
+              const absentRecords  = (completedSummary.records || []).filter(r => r.status === 'ABSENT');
+              const total  = completedSummary.summary?.totalStudents ?? completedSummary.records?.length ?? 0;
+              const present = completedSummary.summary?.presentCount ?? presentRecords.length;
+              const absent  = absentRecords.length || (completedSummary.summary?.absentCount ?? Math.max(0, total - present));
+              const pct    = total > 0 ? ((present / total) * 100).toFixed(0) : (completedSummary.summary?.attendancePercentage ?? 0);
+              return (<>
+                <StatBox icon={Users}        label="Total Section Students" value={total}     color="indigo" />
+                <StatBox icon={CheckCircle2} label="Present Students"       value={present}   color="emerald" />
+                <StatBox icon={XCircle}      label="Absent Students"        value={absent}    color="rose" />
+                <StatBox icon={Award}        label="Overall Attendance %"   value={`${pct}%`} color="violet" />
+              </>);
+            })()}
           </div>
 
           {/* Full Student Attendance Records Table */}

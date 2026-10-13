@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   Shield,
+  ShieldCheck,
   ChevronRight,
   Building2,
   CalendarCheck,
@@ -110,7 +111,6 @@ export const DashboardLayout = () => {
       );
     } else if (user.role === ROLES.HOD) {
       links.push(
-        { name: 'Dashboard', path: '/hod/dashboard', icon: LayoutDashboard },
         { name: 'Department', path: '/hod/department', icon: Building2 },
         { name: 'Programs', path: '/hod/programs', icon: BookOpen },
         { name: 'Academic Years', path: '/hod/academic-years', icon: Layers },
@@ -119,20 +119,19 @@ export const DashboardLayout = () => {
         { name: 'Teachers', path: '/hod/teachers', icon: Users },
         { name: 'Assignments', path: '/hod/assignments', icon: Briefcase },
         { name: 'Students', path: '/hod/students', icon: GraduationCap },
-        { name: 'Attendance', path: '/hod/attendance', icon: CalendarCheck },
         { name: 'Reports', path: '/hod/reports', icon: FileText }
       );
     } else if (user.role === ROLES.TEACHER) {
       links.push(
-        { name: 'Dashboard', path: '/teacher/dashboard', icon: LayoutDashboard },
-        { name: 'Students', path: '/teacher/students', icon: GraduationCap },
-        { name: 'Attendance Summary', path: '/teacher/summary', icon: CalendarCheck }
+        { name: 'Dashboard',          path: '/teacher/dashboard',          icon: LayoutDashboard },
+        { name: 'Students',           path: '/teacher/students',           icon: GraduationCap },
+        { name: 'Attendance Summary', path: '/teacher/summary',            icon: CalendarCheck },
+        { name: 'Reports',            path: '/teacher/reports',            icon: FileText },
+        { name: 'Face Authorization', path: '/teacher/face-authorization', icon: ShieldCheck }
       );
     } else if (user.role === ROLES.STUDENT) {
       links.push(
-        { name: 'Dashboard',          path: '/student/dashboard',         icon: LayoutDashboard },
         { name: 'Scan Attendance',     path: '/student/scan',              icon: QrCode },
-        { name: 'My Attendance',       path: '/student/attendance',        icon: CalendarCheck },
         { name: 'Subject Attendance',  path: '/student/subjects',          icon: BookOpen },
         { name: 'History',             path: '/student/history',           icon: FileText },
         { name: 'Profile',             path: '/student/profile',           icon: User }

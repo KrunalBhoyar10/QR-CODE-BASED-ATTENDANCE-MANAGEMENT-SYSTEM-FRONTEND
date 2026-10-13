@@ -59,8 +59,45 @@ export const teacherService = {
     return response.data;
   },
 
+  getSectionStudentsAttendance: async (sectionId) => {
+    const response = await api.get(`/teacher/sections/${sectionId}/students/attendance`);
+    return response.data;
+  },
+
+  getSectionStudentsSubjectAttendance: async (sectionId, subjectId, params = {}) => {
+    const response = await api.get(`/teacher/sections/${sectionId}/students/attendance/${subjectId}`, { params });
+    return response.data;
+  },
+
   deleteStudent: async (studentId) => {
     const response = await api.delete(`/teacher/students/${studentId}`);
+    return response.data;
+  },
+
+  // ── Face Photo Authorization ───────────────────────────────────────────────
+  /**
+   * Get a student's face change status (changeCount, limit, teacherAuthorized, hasPhoto).
+   * Teacher can only view students in their assigned sections.
+   */
+  getStudentFaceStatus: async (studentId) => {
+    const response = await api.get(`/teacher/students/${studentId}/face-status`);
+    return response.data;
+  },
+
+  /**
+   * Authorize one additional face photo change for a specific student.
+   * Only works for students in the teacher's assigned sections.
+   */
+  authorizeStudentFaceChange: async (studentId) => {
+    const response = await api.post(`/teacher/students/${studentId}/face-authorize`);
+    return response.data;
+  },
+
+  /**
+   * Revoke a previously granted face-change authorization.
+   */
+  revokeStudentFaceAuthorization: async (studentId) => {
+    const response = await api.delete(`/teacher/students/${studentId}/face-authorize`);
     return response.data;
   },
 

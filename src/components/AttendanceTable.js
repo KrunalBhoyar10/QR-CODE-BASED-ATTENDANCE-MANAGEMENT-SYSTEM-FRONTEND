@@ -87,7 +87,7 @@ const AttendanceTable = ({
                 Student
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Roll Number
+                Enrollment No
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
@@ -129,10 +129,7 @@ const AttendanceTable = ({
                 </td>
                 
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">{record.rollNumber}</div>
-                  {record.enrollmentNumber && (
-                    <div className="text-sm text-gray-500">{record.enrollmentNumber}</div>
-                  )}
+                  <div className="text-sm text-gray-900">{record.enrollmentNumber || '—'}</div>
                 </td>
 
                 <td className="px-6 py-4 whitespace-nowrap">

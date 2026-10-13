@@ -124,12 +124,6 @@ export const AttendanceSummary = () => {
         attRes?.summary ||
         null;
 
-      console.log('[ViewSummary] detailRes:', detailRes);
-      console.log('[ViewSummary] attRes:', attRes);
-      console.log('[ViewSummary] resolved detail:', detail);
-      console.log('[ViewSummary] resolved records:', records);
-      console.log('[ViewSummary] resolved summary:', summary);
-
       setSessionDetail(detail);
       setAttendanceSummary(summary);
       setAttendanceRecords(records);

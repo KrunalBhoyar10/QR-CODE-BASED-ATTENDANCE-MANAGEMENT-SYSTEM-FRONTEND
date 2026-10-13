@@ -1,9 +1,31 @@
 import axios from 'axios';
 import { tokenStorage } from '../utils/tokenStorage';
+import { normalizeLatLng } from '../utils/geolocation';
+
+/**
+ * In dev, Vite proxies /api → backend on the dev machine.
+ * On a phone (LAN IP host), localhost:5000 in .env points at the phone — use same-origin /api instead.
+ */
+export const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL?.trim()?.replace(/\/$/, '');
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+    const onDevMachine = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (import.meta.env.DEV) {
+      if (!onDevMachine) {
+        return `${origin}/api/v1`;
+      }
+      if (!envUrl || /localhost|127\.0\.0\.1/.test(envUrl)) {
+        return `${origin}/api/v1`;
+      }
+    }
+  }
+  return envUrl || 'http://localhost:5000/api/v1';
+};
 
 // ─── Singleton axios instance ─────────────────────────────────────────────────
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1',
+  baseURL: resolveApiBaseUrl(),
   timeout: 15000,
 });
 
@@ -65,15 +87,9 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const response = await axios.post(
-          // Use an absolute path anchored to the current origin so it works
-          // whether VITE_API_BASE_URL is a full URL (desktop) or a relative
-          // path like /api/v1 (mobile via Vite proxy).
-          (api.defaults.baseURL?.startsWith('http')
-            ? `${api.defaults.baseURL}/auth/refresh`
-            : `${window.location.origin}${api.defaults.baseURL}/auth/refresh`),
-          { refreshToken }
-        );
+        // Use the same api instance so the Vite proxy intercepts /api/* correctly.
+        // Never use raw axios here — it bypasses the proxy and gets a 404.
+        const response = await api.post('/auth/refresh-token', { refreshToken });
         const { accessToken, refreshToken: newRefresh } = response.data?.data || {};
         if (accessToken) {
           tokenStorage.setAccessToken(accessToken);
@@ -129,12 +145,26 @@ export const getGeolocation = () =>
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) =>
+      ({ coords }) => {
+        const normalized = normalizeLatLng(coords.latitude, coords.longitude);
+        if (!normalized) {
+          reject(new Error('Invalid GPS coordinates from device. Turn location off and on, then try again.'));
+          return;
+        }
+        // Indoor / weak signal: warn above 2 km but still allow (geofence uses best available fix)
+        if (coords.accuracy > 2000) {
+          reject(new Error(
+            `GPS accuracy too low (±${Math.round(coords.accuracy)}m). ` +
+            'Move closer to a window, enable high-accuracy location, and try again.'
+          ));
+          return;
+        }
         resolve({
-          latitude: coords.latitude,
-          longitude: coords.longitude,
+          latitude: normalized.latitude,
+          longitude: normalized.longitude,
           accuracy: coords.accuracy,
-        }),
+        });
+      },
       (err) => {
         const msgs = {
           1: 'Location access was denied. Please allow location in browser settings.',
@@ -143,6 +173,6 @@ export const getGeolocation = () =>
         };
         reject(new Error(msgs[err.code] || 'Unable to get location.'));
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }  // maximumAge:0 = always fresh
     );
   });

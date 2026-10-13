@@ -1,4 +1,14 @@
 import api from './api';
+import { filterActiveSubjects } from '../utils/subjects';
+
+const filterSubjectListResponse = (payload) => {
+  if (!payload) return payload;
+  if (Array.isArray(payload)) return filterActiveSubjects(payload);
+  if (Array.isArray(payload.data)) {
+    return { ...payload, data: filterActiveSubjects(payload.data) };
+  }
+  return payload;
+};
 
 export const hodService = {
   // Departments
@@ -28,6 +38,10 @@ export const hodService = {
     const response = await api.patch(`/hod/programs/${id}`, data);
     return response.data;
   },
+  deleteProgram: async (id) => {
+    const response = await api.delete(`/hod/programs/${id}`);
+    return response.data;
+  },
 
   // Academic Years
   listAcademicYears: async (programId) => {
@@ -40,6 +54,10 @@ export const hodService = {
   },
   updateAcademicYear: async (id, data) => {
     const response = await api.patch(`/hod/academic-years/${id}`, data);
+    return response.data;
+  },
+  deleteAcademicYear: async (id) => {
+    const response = await api.delete(`/hod/academic-years/${id}`);
     return response.data;
   },
 
@@ -62,9 +80,25 @@ export const hodService = {
   },
 
   // Subjects
-  listSubjects: async (params) => {
+  listSubjects: async (params = {}) => {
+    const response = await api.get('/hod/subjects', {
+      params: { activeOnly: true, ...params },
+    });
+    return filterSubjectListResponse(response.data);
+  },
+  listSubjectsByYear: async (programId, academicYearId, extraParams = {}) => {
+    const params = { activeOnly: true, ...extraParams };
+    if (programId) {
+      params.programId = programId;
+      params.program_id = programId;
+    }
+    if (academicYearId) {
+      params.academicYearId = academicYearId;
+      params.academic_year_id = academicYearId;
+      params.yearId = academicYearId;
+    }
     const response = await api.get('/hod/subjects', { params });
-    return response.data;
+    return filterSubjectListResponse(response.data);
   },
   createSubject: async (data) => {
     const response = await api.post('/hod/subjects', data);
@@ -72,6 +106,10 @@ export const hodService = {
   },
   updateSubject: async (id, data) => {
     const response = await api.patch(`/hod/subjects/${id}`, data);
+    return response.data;
+  },
+  deleteSubject: async (id) => {
+    const response = await api.delete(`/hod/subjects/${id}`);
     return response.data;
   },
 
@@ -90,6 +128,10 @@ export const hodService = {
   },
   resetTeacherPassword: async (id) => {
     const response = await api.post(`/hod/teachers/${id}/reset-password`);
+    return response.data;
+  },
+  deleteTeacher: async (id) => {
+    const response = await api.delete(`/hod/teachers/${id}`);
     return response.data;
   },
 
@@ -118,8 +160,19 @@ export const hodService = {
   },
 
   // Students
-  listStudents: async (params) => {
-    const response = await api.get('/hod/students', { params });
+  listStudents: async (params = {}) => {
+    const query = { ...params };
+    if (params.programId) {
+      query.program_id = params.programId;
+    }
+    if (params.academicYearId) {
+      query.academic_year_id = params.academicYearId;
+      query.yearId = params.academicYearId;
+    }
+    if (params.sectionId) {
+      query.section_id = params.sectionId;
+    }
+    const response = await api.get('/hod/students', { params: query });
     return response.data;
   },
 
@@ -150,6 +203,10 @@ export const hodService = {
   },
   getReportsSummary: async (params) => {
     const response = await api.get('/hod/reports', { params });
+    return response.data;
+  },
+  getSectionStudentsSubjectAttendance: async (sectionId, subjectId, params = {}) => {
+    const response = await api.get(`/hod/sections/${sectionId}/students/attendance/${subjectId}`, { params });
     return response.data;
   },
 };

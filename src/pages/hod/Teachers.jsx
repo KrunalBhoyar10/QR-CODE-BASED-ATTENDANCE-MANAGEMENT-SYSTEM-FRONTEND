@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Users, Plus, Power, PowerOff, KeyRound,
-  MessageCircle, Eye, EyeOff, Copy, CheckCheck,
+  MessageCircle, Eye, EyeOff, Copy, CheckCheck, Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -32,6 +32,10 @@ const Teachers = () => {
   const [credentials, setCredentials] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [copied, setCopied] = useState('');
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  const [teacherToDelete, setTeacherToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // ── Form ────────────────────────────────────────────────────────────────────
   const [formData, setFormData] = useState(emptyForm);
@@ -120,6 +124,21 @@ const Teachers = () => {
     }
   };
 
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  const handleDeleteConfirm = async () => {
+    if (!teacherToDelete) return;
+    setIsDeleting(true);
+    try {
+      await hodService.deleteTeacher(teacherToDelete.id);
+      setTeacherToDelete(null);
+      fetchTeachers();
+    } catch (err) {
+      alert(getErrorMessage(err, 'Failed to delete teacher'));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // ── Reset Password ──────────────────────────────────────────────────────────
   const handleResetPasswordConfirm = async () => {
     setFormLoading(true);
@@ -189,10 +208,6 @@ const Teachers = () => {
       )
     },
     {
-      header: 'Assignments',
-      render: (row) => row._count?.teachingAssignments ?? '—'
-    },
-    {
       header: 'Status',
       render: (row) => (
         <Badge variant={row.user.isActive ? 'success' : 'error'}>
@@ -221,6 +236,13 @@ const Teachers = () => {
             className="p-1.5 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
           >
             <KeyRound className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setTeacherToDelete(row)}
+            title="Delete Teacher"
+            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       )
@@ -384,10 +406,23 @@ const Teachers = () => {
           title="Reset Teacher Password"
           message={`Reset password for ${selectedTeacher.user?.firstName} ${selectedTeacher.user?.lastName}? A new temporary password will be generated.`}
           confirmText="Reset Password"
-          isDestructive
+          variant="danger"
           isLoading={formLoading}
         />
       )}
+
+      {/* ── Delete Confirm ──────────────────────────────────────────────────── */}
+      <ConfirmDialog
+        isOpen={!!teacherToDelete}
+        onClose={() => !isDeleting && setTeacherToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Teacher"
+        message={`Are you sure you want to permanently delete ${teacherToDelete?.user?.firstName || ''} ${teacherToDelete?.user?.lastName || ''} (${teacherToDelete?.employeeId || ''})? This action cannot be undone.`}
+        confirmText="Delete Teacher"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 };

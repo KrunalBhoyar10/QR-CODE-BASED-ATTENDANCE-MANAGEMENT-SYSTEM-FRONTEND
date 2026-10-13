@@ -10,6 +10,7 @@ import {
   Mail,
   Phone,
   RefreshCw,
+  BookOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent } from '../../components/ui/Card';
@@ -39,6 +40,13 @@ export const TeacherStudents = () => {
 
   // Students Data
   const [students, setStudents] = useState([]);
+  // attendanceMap: { [studentId]: { attendancePercentage, presentCount, totalSessions } }
+  const [attendanceMap, setAttendanceMap] = useState({});
+
+  // Subject filter
+  const [subjectsList, setSubjectsList] = useState([]); // subjects for selected section
+  const [selectedSubjectId, setSelectedSubjectId] = useState(''); // '' = overall
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
 
   // Delete Modal State
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -60,6 +68,8 @@ export const TeacherStudents = () => {
       // Extract all assigned unique sections
       const extractedSections = [];
       const seenSectionIds = new Set();
+      // Map: sectionId → [{ id, name, code }]
+      const sectionSubjectsMap = {};
 
       if (rawData?.assignments && Array.isArray(rawData.assignments)) {
         rawData.assignments.forEach((a) => {
@@ -73,6 +83,18 @@ export const TeacherStudents = () => {
               programId: a.program?.id,
               academicYearId: a.academicYear?.id,
             });
+          }
+          // Collect subjects per section
+          if (a.section?.id && a.subject?.id) {
+            if (!sectionSubjectsMap[a.section.id]) sectionSubjectsMap[a.section.id] = [];
+            const already = sectionSubjectsMap[a.section.id].some(s => s.id === a.subject.id);
+            if (!already) {
+              sectionSubjectsMap[a.section.id].push({
+                id: a.subject.id,
+                name: a.subject.name,
+                code: a.subject.code,
+              });
+            }
           }
         });
       } else if (rawData?.tree && Array.isArray(rawData.tree)) {
@@ -97,14 +119,18 @@ export const TeacherStudents = () => {
       }
 
       setSectionsList(extractedSections);
+      // Store map in a ref so section changes can update subjects dropdown
+      fetchAssignments._subjectsMap = sectionSubjectsMap;
 
       // Auto-select first available section if present
       if (extractedSections.length > 0) {
-        setSelectedSectionId(extractedSections[0].id);
-        if (extractedSections[0].programId) {
-          setSelectedProgramId(extractedSections[0].programId);
-        }
-        await loadSectionStudents(extractedSections[0].id);
+        const firstSec = extractedSections[0];
+        setSelectedSectionId(firstSec.id);
+        if (firstSec.programId) setSelectedProgramId(firstSec.programId);
+        const subs = sectionSubjectsMap[firstSec.id] || [];
+        setSubjectsList(subs);
+        setSelectedSubjectId('');
+        await loadSectionStudents(firstSec.id);
       }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load teacher assignments'));
@@ -116,16 +142,22 @@ export const TeacherStudents = () => {
   const loadSectionStudents = async (sectionId) => {
     if (!sectionId) {
       setStudents([]);
+      setAttendanceMap({});
       return;
     }
     setLoadingStudents(true);
     try {
-      const res = await teacherService.getSectionStudents(sectionId);
-      const studentData = Array.isArray(res?.data) ? res.data : (res?.data?.students || []);
+      const [studentsRes, attendanceRes] = await Promise.all([
+        teacherService.getSectionStudents(sectionId),
+        teacherService.getSectionStudentsAttendance(sectionId).catch(() => ({ data: {} })),
+      ]);
+      const studentData = Array.isArray(studentsRes?.data) ? studentsRes.data : (studentsRes?.data?.students || []);
       setStudents(studentData);
+      setAttendanceMap(attendanceRes?.data || {});
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to load students for selected section'));
       setStudents([]);
+      setAttendanceMap({});
     } finally {
       setLoadingStudents(false);
     }
@@ -134,10 +166,12 @@ export const TeacherStudents = () => {
   const handleSectionChange = async (e) => {
     const sectionId = e.target.value;
     setSelectedSectionId(sectionId);
+    setSelectedSubjectId(''); // reset subject filter
     const sec = sectionsList.find((s) => s.id === sectionId);
-    if (sec && sec.programId) {
-      setSelectedProgramId(sec.programId);
-    }
+    if (sec && sec.programId) setSelectedProgramId(sec.programId);
+    // Update subjects dropdown for this section
+    const subs = (fetchAssignments._subjectsMap || {})[sectionId] || [];
+    setSubjectsList(subs);
     await loadSectionStudents(sectionId);
   };
 
@@ -151,10 +185,35 @@ export const TeacherStudents = () => {
     if (availableSections.length > 0) {
       const firstSecId = availableSections[0].id;
       setSelectedSectionId(firstSecId);
+      setSelectedSubjectId('');
+      const subs = (fetchAssignments._subjectsMap || {})[firstSecId] || [];
+      setSubjectsList(subs);
       loadSectionStudents(firstSecId);
     } else {
       setSelectedSectionId('');
       setStudents([]);
+    }
+  };
+
+  // ── Subject filter change ───────────────────────────────────────────────────
+  const handleSubjectChange = async (e) => {
+    const subjectId = e.target.value;
+    setSelectedSubjectId(subjectId);
+    if (!selectedSectionId) return;
+    setLoadingAttendance(true);
+    try {
+      if (!subjectId) {
+        // Back to overall attendance
+        const res = await teacherService.getSectionStudentsAttendance(selectedSectionId).catch(() => ({ data: {} }));
+        setAttendanceMap(res?.data || {});
+      } else {
+        const res = await teacherService.getSectionStudentsSubjectAttendance(selectedSectionId, subjectId).catch(() => ({ data: {} }));
+        setAttendanceMap(res?.data || {});
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoadingAttendance(false);
     }
   };
 
@@ -214,13 +273,11 @@ export const TeacherStudents = () => {
     const q = searchQuery.toLowerCase().trim();
     return students.filter((s) => {
       const fullName = `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.toLowerCase();
-      const roll = (s.rollNumber || '').toLowerCase();
       const enroll = (s.enrollmentNumber || '').toLowerCase();
       const email = (s.user?.email || '').toLowerCase();
       const phone = (s.user?.phoneNumber || '').toLowerCase();
       return (
         fullName.includes(q) ||
-        roll.includes(q) ||
         enroll.includes(q) ||
         email.includes(q) ||
         phone.includes(q)
@@ -272,13 +329,38 @@ export const TeacherStudents = () => {
       },
     },
     {
-      header: 'Status',
+      header: selectedSubjectId
+        ? `Attendance — ${subjectsList.find(s => s.id === selectedSubjectId)?.name || 'Subject'}`
+        : 'Status & Attendance',
       key: 'status',
-      render: (row) => (
-        <Badge variant={row.user?.isActive !== false ? 'success' : 'error'}>
-          {row.user?.isActive !== false ? 'Active' : 'Inactive'}
-        </Badge>
-      ),
+      render: (row) => {
+        const isActive = row.user?.isActive !== false;
+        const att = attendanceMap[row.id];
+        const pct = att?.attendancePercentage ?? null;
+        const pctColor = pct === null ? 'text-slate-400'
+          : pct >= 75 ? 'text-emerald-600'
+          : pct >= 50 ? 'text-amber-600'
+          : 'text-rose-600';
+        return (
+          <div className="flex flex-col gap-1.5">
+            <Badge variant={isActive ? 'success' : 'error'}>
+              {isActive ? 'Active' : 'Inactive'}
+            </Badge>
+            {loadingAttendance ? (
+              <span className="text-[11px] text-slate-400 animate-pulse">Loading…</span>
+            ) : pct !== null ? (
+              <div className={`flex items-center gap-1 text-xs font-bold ${pctColor}`}>
+                <span>{pct.toFixed(1)}%</span>
+                <span className="text-slate-400 font-normal">
+                  ({att.presentCount}/{att.totalSessions})
+                </span>
+              </div>
+            ) : (
+              <span className="text-[11px] text-slate-400">—%</span>
+            )}
+          </div>
+        );
+      },
     },
     {
       header: 'Actions',
@@ -415,6 +497,24 @@ export const TeacherStudents = () => {
               }))}
             />
           </div>
+          {/* Subject filter — only shown when section is selected */}
+          {selectedSectionId && subjectsList.length > 0 && (
+            <div className="w-64 flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-slate-400 shrink-0" />
+              <Select
+                value={selectedSubjectId}
+                onChange={handleSubjectChange}
+                disabled={loadingAttendance}
+                options={[
+                  { value: '', label: 'All Subjects (Overall)' },
+                  ...subjectsList.map((s) => ({
+                    value: s.id,
+                    label: `${s.name}${s.code ? ` (${s.code})` : ''}`,
+                  })),
+                ]}
+              />
+            </div>
+          )}
         </div>
 
         <CardContent className="p-0">
@@ -460,9 +560,9 @@ export const TeacherStudents = () => {
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Roll Number:</span>
+                <span className="text-slate-500 font-medium">Enrollment Number:</span>
                 <span className="font-mono font-bold text-slate-900">
-                  {studentToDelete.rollNumber || '—'}
+                  {studentToDelete.enrollmentNumber || '—'}
                 </span>
               </div>
               <div className="flex justify-between">
