@@ -129,17 +129,43 @@ export default function StudentDashboard() {
 
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Classes"   value={summary?.totalClasses ?? 0}  icon={BookOpen}      color="indigo" />
-        <StatCard label="Attended"         value={summary?.attended ?? 0}       icon={CheckCircle2}  color="emerald" />
-        <StatCard label="Absent"           value={summary?.absent ?? 0}         icon={XCircle}       color="rose" />
-        <StatCard label="Overall %"        value={`${(summary?.overallPercentage ?? 0).toFixed(1)}%`} icon={TrendingUp} color="amber" />
+        <StatCard
+          label="Total Classes"
+          value={summary?.totalClasses ?? summary?.totalSessions ?? 0}
+          icon={BookOpen}
+          color="indigo"
+        />
+        <StatCard
+          label="Attended"
+          value={summary?.attended ?? summary?.presentCount ?? summary?.effectiveAttended ?? 0}
+          icon={CheckCircle2}
+          color="emerald"
+        />
+        <StatCard
+          label="Absent"
+          value={
+            (summary?.absentCount && summary.absentCount > 0)
+              ? summary.absentCount
+              : (summary?.absent && summary.absent > 0)
+              ? summary.absent
+              : Math.max(0, (summary?.totalClasses ?? summary?.totalSessions ?? 0) - (summary?.attended ?? summary?.presentCount ?? 0))
+          }
+          icon={XCircle}
+          color="rose"
+        />
+        <StatCard
+          label="Overall %"
+          value={`${Number(summary?.overallPercentage ?? summary?.attendancePercentage ?? 0).toFixed(1)}%`}
+          icon={TrendingUp}
+          color="amber"
+        />
       </div>
 
       {/* Ring + subjects */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Ring */}
         <Card className="flex items-center justify-center py-4">
-          <AttendanceRing percentage={summary?.overallPercentage} />
+          <AttendanceRing percentage={summary?.overallPercentage ?? summary?.attendancePercentage} />
         </Card>
 
         {/* Subject summary */}
@@ -158,15 +184,17 @@ export default function StudentDashboard() {
             ) : (
               <ul className="divide-y divide-slate-100">
                 {subjects.slice(0, 5).map((subj) => {
-                  const pct = subj.attendancePercentage ?? 0;
+                  const total = subj.totalClasses ?? subj.totalSessions ?? 0;
+                  const attended = subj.attended ?? subj.presentCount ?? subj.effectiveAttended ?? 0;
+                  const pct = subj.attendancePercentage ?? (total > 0 ? (attended / total) * 100 : 0);
                   const color = pct >= 75 ? 'emerald' : pct >= 60 ? 'amber' : 'rose';
                   return (
                     <li key={subj.subjectId || subj.id} className="flex items-center justify-between px-6 py-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-slate-900 truncate">{subj.subjectName}</p>
-                        <p className="text-xs text-slate-500">{subj.attended ?? 0}/{subj.totalClasses ?? 0} classes</p>
+                        <p className="text-xs text-slate-500">{attended}/{total} classes</p>
                       </div>
-                      <Badge variant={color}>{pct.toFixed(1)}%</Badge>
+                      <Badge variant={color}>{Number(pct).toFixed(1)}%</Badge>
                     </li>
                   );
                 })}

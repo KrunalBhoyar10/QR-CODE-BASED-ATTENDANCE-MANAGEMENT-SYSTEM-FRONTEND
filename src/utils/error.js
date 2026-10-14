@@ -11,6 +11,10 @@ export const getErrorMessage = (error, defaultMessage = 'An unexpected error occ
 
     // Backend error structure: { success: false, message: "...", error: ... }
     if (data?.message && typeof data.message === 'string') {
+      const details = data?.error?.details || data?.details;
+      if (details && typeof details === 'string' && details.length < 200 && !details.includes('\n')) {
+        return `${data.message} (${details})`;
+      }
       return data.message;
     }
 

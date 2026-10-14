@@ -77,15 +77,16 @@ export default function SubjectAttendance() {
           {/* Subject cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {subjects.map((subj) => {
-              const pct  = subj.attendancePercentage ?? 0;
-              const good = pct >= 75;
-              const warn = pct >= 60 && pct < 75;
-              const bad  = pct < 60;
-              const variant = good ? 'emerald' : warn ? 'amber' : 'rose';
+              const total    = Number(subj.totalClasses ?? subj.totalSessions ?? 0);
+              const attended = Number(subj.attended ?? subj.presentCount ?? subj.effectiveAttended ?? 0);
+              const pct      = Number(subj.attendancePercentage ?? (total > 0 ? (attended / total) * 100 : 0));
+              const noClass  = total === 0;
+              const good     = !noClass && pct >= 75;
+              const warn     = !noClass && pct >= 60 && pct < 75;
+              const bad      = !noClass && pct < 60;
+              const variant  = noClass ? 'slate' : good ? 'emerald' : warn ? 'amber' : 'rose';
 
               // How many more classes needed to reach 75%
-              const total    = subj.totalClasses ?? 0;
-              const attended = subj.attended ?? 0;
               let toReach75  = null;
               if (pct < 75 && total > 0) {
                 // Need (75% * (total + x)) ≤ attended + x  →  solve for x
@@ -115,11 +116,17 @@ export default function SubjectAttendance() {
                     <ProgressBar value={pct} />
 
                     <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
-                      <span>{attended} attended</span>
+                      <span className="font-medium text-slate-700">{attended} attended</span>
                       <span>{total} total classes</span>
                     </div>
 
                     {/* Alert / info line */}
+                    {noClass && (
+                      <div className="mt-3 flex items-start gap-1.5 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                        <BookOpen className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
+                        <span>No attendance sessions conducted for this subject yet.</span>
+                      </div>
+                    )}
                     {bad && (
                       <div className="mt-3 flex items-start gap-1.5 text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">
                         <TrendingDown className="w-3.5 h-3.5 shrink-0 mt-0.5" />

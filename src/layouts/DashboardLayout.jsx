@@ -104,9 +104,7 @@ export const DashboardLayout = () => {
     if (user.role === ROLES.PRINCIPAL) {
       links.push(
         { name: 'Dashboard', path: '/principal/dashboard', icon: LayoutDashboard },
-        { name: 'Departments', path: '/principal/departments', icon: Building2 },
         { name: 'HOD Management', path: '/principal/hods', icon: Users },
-        { name: 'Attendance', path: '/principal/attendance', icon: CalendarCheck },
         { name: 'Reports', path: '/principal/reports', icon: FileText }
       );
     } else if (user.role === ROLES.HOD) {

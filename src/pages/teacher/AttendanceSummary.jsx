@@ -74,7 +74,45 @@ export const AttendanceSummary = () => {
       ]);
 
       const sessList = sessionsRes?.data?.sessions || (Array.isArray(sessionsRes?.data) ? sessionsRes.data : []);
-      setSessions(sessList);
+
+      // Pre-fetch section student counts to accurately show Present/Absent on every row
+      const uniqueSectionIds = Array.from(
+        new Set(sessList.map((s) => s.section?.id || s.sectionId).filter(Boolean))
+      );
+
+      const sectionCounts = {};
+      if (uniqueSectionIds.length > 0) {
+        await Promise.all(
+          uniqueSectionIds.map(async (secId) => {
+            try {
+              const res = await teacherService.getSectionStudents(secId);
+              const list = Array.isArray(res?.data)
+                ? res.data
+                : Array.isArray(res?.students)
+                ? res.students
+                : [];
+              sectionCounts[secId] = list.length;
+            } catch { /* silent */ }
+          })
+        );
+      }
+
+      const enrichedSessions = sessList.map((s) => {
+        const secId = s.section?.id || s.sectionId;
+        const total = Number(s.totalStudents || sectionCounts[secId] || 0);
+        const present = Number(s.presentCount ?? s.totalAttendanceMarked ?? 0);
+        const absent = total > 0 ? Math.max(0, total - present) : (s.absentCount ?? 0);
+        const pct = total > 0 ? Number(((present / total) * 100).toFixed(1)) : 0;
+        return {
+          ...s,
+          totalStudents: total,
+          presentCount: present,
+          absentCount: absent,
+          attendancePercentage: pct,
+        };
+      });
+
+      setSessions(enrichedSessions);
 
       if (assignRes?.data) {
         setAssignmentsData(assignRes.data);
@@ -129,14 +167,18 @@ export const AttendanceSummary = () => {
       setAttendanceRecords(records);
 
       // Fetch all enrolled students for the section to build the absent list
-      const sectionId = detail?.section?.id || session?.section?.id;
+      const sectionId =
+        detail?.section?.id ||
+        detail?.sectionId ||
+        session?.section?.id ||
+        session?.sectionId;
       if (sectionId) {
         try {
           const studentsRes = await teacherService.getSectionStudents(sectionId);
           const allStudents =
-            studentsRes?.data?.students ||
-            studentsRes?.students ||
-            (Array.isArray(studentsRes?.data) ? studentsRes.data : []);
+            Array.isArray(studentsRes?.data) ? studentsRes.data :
+            Array.isArray(studentsRes?.students) ? studentsRes.students :
+            Array.isArray(studentsRes) ? studentsRes : [];
           setSectionStudents(allStudents);
         } catch {
           // Non-critical — absent list will be empty if this fails
@@ -200,9 +242,15 @@ export const AttendanceSummary = () => {
 
   // ── High-Level Statistics ───────────────────────────────────────────────────
   const totalSessions = sessions.length;
-  const completedSessions = sessions.filter((s) => s.status === 'COMPLETED').length;
+  const completedSessions = sessions.filter(
+    (s) => s.status === 'COMPLETED' || s.status === 'ENDED'
+  ).length;
   const totalMarkedRecords = sessions.reduce(
-    (acc, curr) => acc + (curr.totalAttendanceMarked || 0),
+    (acc, curr) => acc + (curr.presentCount ?? curr.totalAttendanceMarked ?? 0),
+    0
+  );
+  const totalAbsentRecords = sessions.reduce(
+    (acc, curr) => acc + (curr.absentCount ?? 0),
     0
   );
 
@@ -262,7 +310,7 @@ export const AttendanceSummary = () => {
       render: (row) => (
         <Badge
           variant={
-            row.status === 'COMPLETED'
+            row.status === 'COMPLETED' || row.status === 'ENDED'
               ? 'success'
               : row.status === 'ACTIVE'
               ? 'indigo'
@@ -274,13 +322,40 @@ export const AttendanceSummary = () => {
       ),
     },
     {
-      header: 'Attendance Marked',
+      header: 'Attendance Summary',
       key: 'marked',
-      render: (row) => (
-        <span className="font-bold text-slate-900 text-sm">
-          {row.totalAttendanceMarked ?? 0} Students
-        </span>
-      ),
+      render: (row) => {
+        const present = Number(row.presentCount ?? row.totalAttendanceMarked ?? 0);
+        const total = Number(row.totalStudents ?? 0);
+        const hasTotal = total > 0;
+        const absent = hasTotal ? Math.max(0, total - present) : row.absentCount;
+        const pct = hasTotal ? Math.round((present / total) * 100) : null;
+
+        return (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                {present} Present
+              </span>
+              {absent != null && (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
+                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                  {absent} Absent
+                </span>
+              )}
+            </div>
+            {hasTotal && (
+              <div className="text-[11px] text-slate-500 font-medium">
+                Total Enrolled: <span className="font-semibold text-slate-700">{total}</span>
+                {pct != null && (
+                  <span className="ml-1 text-indigo-600 font-semibold">({pct}%)</span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       header: 'Actions',
@@ -339,7 +414,7 @@ export const AttendanceSummary = () => {
       </div>
 
       {/* ── Top Metric KPI Cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4.5 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">
@@ -355,7 +430,7 @@ export const AttendanceSummary = () => {
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4.5 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-emerald-500">
-              Completed Sessions
+              Completed / Ended
             </p>
             <p className="text-2xl font-bold text-emerald-900 mt-1">{completedSessions}</p>
           </div>
@@ -373,6 +448,18 @@ export const AttendanceSummary = () => {
           </div>
           <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-purple-600">
             <Users className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-rose-50 border border-rose-100 rounded-xl p-4.5 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-rose-500">
+              Total Absent Count
+            </p>
+            <p className="text-2xl font-bold text-rose-900 mt-1">{totalAbsentRecords}</p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-rose-600">
+            <XCircle className="w-5 h-5" />
           </div>
         </div>
       </div>
@@ -409,6 +496,7 @@ export const AttendanceSummary = () => {
               onChange={(e) => setStatusFilter(e.target.value)}
               options={[
                 { value: '', label: 'All Statuses' },
+                { value: 'ENDED', label: 'Ended' },
                 { value: 'COMPLETED', label: 'Completed' },
                 { value: 'ACTIVE', label: 'Active (Live)' },
                 { value: 'CANCELLED', label: 'Cancelled' },
@@ -457,7 +545,7 @@ export const AttendanceSummary = () => {
                 </div>
                 <Badge
                   variant={
-                    sessionDetail.status === 'COMPLETED'
+                    sessionDetail.status === 'COMPLETED' || sessionDetail.status === 'ENDED'
                       ? 'success'
                       : sessionDetail.status === 'ACTIVE'
                       ? 'indigo'
@@ -495,42 +583,8 @@ export const AttendanceSummary = () => {
             </div>
 
             {/* Attendance Summary Stat Badges */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg text-center">
-                <p className="text-[11px] font-semibold text-indigo-500 uppercase">Total Enrolled</p>
-                <p className="text-xl font-bold text-indigo-900 mt-0.5">
-                  {attendanceSummary?.totalStudents ?? '—'}
-                </p>
-              </div>
-              <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-center">
-                <p className="text-[11px] font-semibold text-emerald-500 uppercase">Present Marked</p>
-                <p className="text-xl font-bold text-emerald-900 mt-0.5">
-                  {attendanceSummary?.presentCount ?? attendanceRecords.length}
-                </p>
-              </div>
-              <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-center">
-                <p className="text-[11px] font-semibold text-rose-500 uppercase">Absent</p>
-                <p className="text-xl font-bold text-rose-900 mt-0.5">
-                  {attendanceSummary?.absentCount ??
-                    Math.max(
-                      0,
-                      (attendanceSummary?.totalStudents || 0) - attendanceRecords.length
-                    )}
-                </p>
-              </div>
-              <div className="p-3 bg-purple-50 border border-purple-100 rounded-lg text-center">
-                <p className="text-[11px] font-semibold text-purple-500 uppercase">Attendance %</p>
-                <p className="text-xl font-bold text-purple-900 mt-0.5">
-                  {attendanceSummary?.attendancePercentage != null
-                    ? `${attendanceSummary.attendancePercentage}%`
-                    : '—'}
-                </p>
-              </div>
-            </div>
-
-            {/* Present / Absent Tabs */}
+            {/* Attendance Summary Stat Badges & Tabs */}
             {(() => {
-              // Build sets for quick lookup
               const presentStudentIds = new Set(
                 attendanceRecords.map((r) => r.studentId)
               );
@@ -539,46 +593,85 @@ export const AttendanceSummary = () => {
                 (s) => !presentStudentIds.has(s.id)
               );
 
-              const presentCount = attendanceRecords.length;
-              const absentCount = absentStudents.length;
+              const totalStudents = Math.max(
+                attendanceSummary?.totalStudents || 0,
+                sectionStudents.length,
+                sessionDetail?.totalStudents || 0
+              );
+              const presentCount = attendanceRecords.length || (attendanceSummary?.presentCount ?? 0);
+              const absentCount = (attendanceSummary?.absentCount != null && attendanceSummary.absentCount > 0)
+                ? attendanceSummary.absentCount
+                : (absentStudents.length || Math.max(0, totalStudents - presentCount));
+              const pctValue = totalStudents > 0
+                ? Number(((presentCount / totalStudents) * 100).toFixed(1))
+                : (attendanceSummary?.attendancePercentage ?? 0);
 
               return (
-                <div>
-                  {/* Tab Headers */}
-                  <div className="flex border-b border-slate-200 mb-3">
-                    <button
-                      onClick={() => setActiveTab('present')}
-                      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
-                        activeTab === 'present'
-                          ? 'border-emerald-500 text-emerald-700'
-                          : 'border-transparent text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Present
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
-                        activeTab === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
-                      }`}>
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg text-center">
+                      <p className="text-[11px] font-semibold text-indigo-500 uppercase">Total Enrolled</p>
+                      <p className="text-xl font-bold text-indigo-900 mt-0.5">
+                        {totalStudents > 0 ? totalStudents : '—'}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-center">
+                      <p className="text-[11px] font-semibold text-emerald-500 uppercase">Present Marked</p>
+                      <p className="text-xl font-bold text-emerald-900 mt-0.5">
                         {presentCount}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('absent')}
-                      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
-                        activeTab === 'absent'
-                          ? 'border-rose-500 text-rose-700'
-                          : 'border-transparent text-slate-500 hover:text-slate-700'
-                      }`}
-                    >
-                      <XCircle className="w-4 h-4" />
-                      Absent
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
-                        activeTab === 'absent' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
-                      }`}>
+                      </p>
+                    </div>
+                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-center">
+                      <p className="text-[11px] font-semibold text-rose-500 uppercase">Absent</p>
+                      <p className="text-xl font-bold text-rose-900 mt-0.5">
                         {absentCount}
-                      </span>
-                    </button>
+                      </p>
+                    </div>
+                    <div className="p-3 bg-purple-50 border border-purple-100 rounded-lg text-center">
+                      <p className="text-[11px] font-semibold text-purple-500 uppercase">Attendance %</p>
+                      <p className="text-xl font-bold text-purple-900 mt-0.5">
+                        {pctValue}%
+                      </p>
+                    </div>
                   </div>
+
+                  {/* Present / Absent Tabs */}
+                  <div>
+                    {/* Tab Headers */}
+                    <div className="flex border-b border-slate-200 mb-3">
+                      <button
+                        onClick={() => setActiveTab('present')}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+                          activeTab === 'present'
+                            ? 'border-emerald-500 text-emerald-700'
+                            : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Present
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
+                          activeTab === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {presentCount}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('absent')}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+                          activeTab === 'absent'
+                            ? 'border-rose-500 text-rose-700'
+                            : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <XCircle className="w-4 h-4" />
+                        Absent
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
+                          activeTab === 'absent' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {absentCount}
+                        </span>
+                      </button>
+                    </div>
 
                   {/* Present List */}
                   {activeTab === 'present' && (
@@ -682,8 +775,9 @@ export const AttendanceSummary = () => {
                     </div>
                   )}
                 </div>
-              );
-            })()}
+              </div>
+            );
+          })()}
 
             <div className="flex justify-end pt-2 border-t border-slate-100">
               <Button variant="outline" onClick={closeSessionDetail}>

@@ -55,25 +55,43 @@ export default function MyAttendance() {
       {!error && summary && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: 'Total Classes',    value: summary.totalClasses  ?? 0, icon: BookOpen,     color: 'indigo' },
-              { label: 'Attended',         value: summary.attended      ?? 0, icon: CheckCircle2, color: 'emerald' },
-              { label: 'Absent',           value: summary.absent        ?? 0, icon: XCircle,      color: 'rose' },
-              { label: 'Overall Percentage', value: `${(summary.overallPercentage ?? 0).toFixed(1)}%`, icon: TrendingUp, color: 'amber' },
-            ].map(({ label, value, icon: Icon, color }) => {
-              const bgMap = { indigo:'bg-indigo-50 text-indigo-600', emerald:'bg-emerald-50 text-emerald-600', rose:'bg-rose-50 text-rose-600', amber:'bg-amber-50 text-amber-600' };
-              return (
-                <div key={label} className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5">
-                  <div className={`w-9 h-9 rounded-lg mb-3 flex items-center justify-center ${bgMap[color]}`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <p className="text-2xl font-bold text-slate-900">{value}</p>
-                  <p className="text-xs text-slate-500 mt-1">{label}</p>
-                </div>
-              );
-            })}
-          </div>
+          {(() => {
+            const total = summary.totalClasses ?? summary.totalSessions ?? 0;
+            const attended = summary.attended ?? summary.presentCount ?? summary.effectiveAttended ?? 0;
+            const absent = (summary.absentCount && summary.absentCount > 0)
+              ? summary.absentCount
+              : (summary.absent && summary.absent > 0)
+              ? summary.absent
+              : Math.max(0, total - attended);
+            const overallPct = Number(summary.overallPercentage ?? summary.attendancePercentage ?? 0);
+
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Classes',      value: total, icon: BookOpen,     color: 'indigo' },
+                  { label: 'Attended',           value: attended, icon: CheckCircle2, color: 'emerald' },
+                  { label: 'Absent',             value: absent, icon: XCircle,      color: 'rose' },
+                  { label: 'Overall Percentage', value: `${overallPct.toFixed(1)}%`, icon: TrendingUp, color: 'amber' },
+                ].map(({ label, value, icon: Icon, color }) => {
+                  const bgMap = {
+                    indigo: 'bg-indigo-50 text-indigo-600',
+                    emerald: 'bg-emerald-50 text-emerald-600',
+                    rose: 'bg-rose-50 text-rose-600',
+                    amber: 'bg-amber-50 text-amber-600',
+                  };
+                  return (
+                    <div key={label} className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5">
+                      <div className={`w-9 h-9 rounded-lg mb-3 flex items-center justify-center ${bgMap[color]}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <p className="text-2xl font-bold text-slate-900">{value}</p>
+                      <p className="text-xs text-slate-500 mt-1">{label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Overall progress */}
           <Card>

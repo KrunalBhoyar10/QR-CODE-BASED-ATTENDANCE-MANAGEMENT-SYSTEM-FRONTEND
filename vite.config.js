@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
 
   // VITE_PROXY_TARGET: where the Vite server forwards /api/* requests.
-  // Always http://localhost:5000 — this never leaves this machine.
-  const proxyTarget = env.VITE_PROXY_TARGET || 'http://localhost:5000';
+  // Defaults to http://127.0.0.1:5000 to avoid IPv6 (::1) dual-stack connection issues.
+  const proxyTarget = env.VITE_PROXY_TARGET || 'http://127.0.0.1:5000';
 
   // Enable HTTPS when LAN_IP is present (set in .env.local for mobile testing).
   // basicSsl() injects a self-signed certificate so the phone treats the page

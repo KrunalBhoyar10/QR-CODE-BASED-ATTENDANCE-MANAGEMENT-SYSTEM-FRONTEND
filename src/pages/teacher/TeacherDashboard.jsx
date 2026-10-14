@@ -100,6 +100,12 @@ export const TeacherDashboard = () => {
   const [liveSummary, setLiveSummary] = useState(null);
   const [closingSession, setClosingSession] = useState(false);
   const closingSessionRef = useRef(false);
+  // Refs to hold latest values for use inside async callbacks (avoids stale closure)
+  const liveAttendanceRecordsRef = useRef([]);
+  const liveSummaryRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const isPollingRef = useRef(false);
+  const isFinishingSessionRef = useRef(false);
 
   // Final Summary View State
   const [completedSummary, setCompletedSummary] = useState(null);
@@ -155,32 +161,59 @@ export const TeacherDashboard = () => {
   }, [activeSession, timeLeftSeconds]);
 
   // Real-time polling for attendance records when session is active (Step 5)
+  // Uses sequential setTimeout polling to avoid connection pool exhaustion on Neon cloud DB
   useEffect(() => {
-    let pollInterval = null;
-    if (activeSession && step === 5) {
-      fetchLiveAttendance(activeSession.id);
-      pollInterval = setInterval(() => {
-        fetchLiveAttendance(activeSession.id);
-      }, 3000);
-    }
-    return () => clearInterval(pollInterval);
-  }, [activeSession, step]);
+    let isMounted = true;
+    isFinishingSessionRef.current = false;
 
-  const fetchLiveAttendance = async (sessionId) => {
-    try {
-      const res = await teacherService.getSessionAttendance(sessionId, { page: 1, limit: 100 });
-      if (res?.data) {
-        setLiveAttendanceRecords(Array.isArray(res.data) ? res.data : []);
+    const runPoll = async () => {
+      if (!isMounted || isFinishingSessionRef.current || !activeSession?.id || step !== 5) {
+        return;
       }
-      // summary is inside pagination object
-      const summary = res?.pagination?.summary || res?.summary;
-      if (summary) {
-        setLiveSummary(summary);
+      if (isPollingRef.current) return;
+
+      isPollingRef.current = true;
+      try {
+        const res = await teacherService.getSessionAttendance(activeSession.id, { page: 1, limit: 100 });
+        if (!isMounted || isFinishingSessionRef.current) return;
+
+        if (res?.data !== undefined) {
+          const records = Array.isArray(res.data) ? res.data : [];
+          setLiveAttendanceRecords(records);
+          liveAttendanceRecordsRef.current = records; // keep ref in sync
+        }
+        const summary = res?.pagination?.summary || res?.summary;
+        if (summary) {
+          setLiveSummary(summary);
+          liveSummaryRef.current = summary; // keep ref in sync
+        }
+      } catch (err) {
+        if (!isMounted || isFinishingSessionRef.current) return;
+        // If unauthenticated (401), stop polling to prevent log flood and allow redirect
+        if (err?.response?.status === 401) {
+          return;
+        }
+      } finally {
+        isPollingRef.current = false;
+        // Schedule next poll only AFTER current request completes
+        if (isMounted && !isFinishingSessionRef.current && activeSession?.id && step === 5) {
+          pollTimerRef.current = setTimeout(runPoll, 3500);
+        }
       }
-    } catch (err) {
-      // silent poll
+    };
+
+    if (activeSession?.id && step === 5) {
+      runPoll();
     }
-  };
+
+    return () => {
+      isMounted = false;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [activeSession?.id, step]);
 
   const handleSessionExpired = async () => {
     toast.error('Attendance session timer expired');
@@ -328,9 +361,23 @@ export const TeacherDashboard = () => {
       if (found) assignmentId = found.id;
     }
 
+    if (!assignmentId) {
+      toast.error('No active teaching assignment found for this subject & section.');
+      return;
+    }
+
+    // Guard against inactive subjects
+    if (selectedSubject.isActive === false || selectedSubject.status === 'INACTIVE') {
+      toast.error('This subject is inactive. Please contact your HOD to reactivate it.');
+      return;
+    }
+
     const dateStr = sessionConfig.sessionDate || getTodayDateString();
     const timeStr = sessionConfig.startTime || getCurrentTimeString();
-    const startDateTime = new Date(`${dateStr}T${timeStr}:00`);
+    const parsedDateTime = new Date(`${dateStr}T${timeStr}:00`);
+    // Ensure start time is not in the past (backend rejects past start times)
+    const now = new Date();
+    const startDateTime = parsedDateTime.getTime() < now.getTime() ? now : parsedDateTime;
 
     if (sessionConfig.enableGps) {
       if (!isValidCoordinatePair(sessionConfig.latitude, sessionConfig.longitude)) {
@@ -340,13 +387,14 @@ export const TeacherDashboard = () => {
     }
 
     setCreatingSession(true);
+    let payload = null;
     try {
       const geo =
         sessionConfig.enableGps && sessionConfig.latitude != null
           ? normalizeLatLng(sessionConfig.latitude, sessionConfig.longitude)
           : null;
 
-      const payload = {
+      payload = {
         teachingAssignmentId: assignmentId,
         subjectId: selectedSubject.subjectId || selectedSubject.id,
         sectionId: selectedSection.sectionId || selectedSection.id,
@@ -366,7 +414,6 @@ export const TeacherDashboard = () => {
 
       const res = await teacherService.createSession(payload);
       const createdData = res?.data || res;
-
       const sessionObj = createdData.session || createdData;
       const qrObj = createdData.qr || {};
 
@@ -382,6 +429,12 @@ export const TeacherDashboard = () => {
       toast.success('Attendance Session Started! QR Code Generated.');
       setStep(5);
     } catch (err) {
+      // Log full backend error for debugging
+      const errData = err?.response?.data;
+      console.error('[Session Creation] Request payload:', payload);
+      console.error('[Session Creation] Status:', err?.response?.status);
+      console.error('[Session Creation] Backend message:', errData?.message || err?.message);
+      console.error('[Session Creation] Full error object:', errData || err);
       toast.error(getErrorMessage(err, 'Failed to create attendance session'));
     } finally {
       setCreatingSession(false);
@@ -400,9 +453,15 @@ export const TeacherDashboard = () => {
 
     closingSessionRef.current = true;
     setClosingSession(true);
+    // Immediately stop any in-flight or scheduled live polling
+    isFinishingSessionRef.current = true;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
     try {
-      // Step 1: Close the session (fast — just a status update)
-      // Retry once on 500 in case of a transient backend error
+      // Step 1: Close the session (fast — status update)
       let closeResponse;
       try {
         closeResponse = await teacherService.closeSession(targetSessionId);
@@ -419,7 +478,7 @@ export const TeacherDashboard = () => {
       }
       setActiveSession((current) => current && ({
         ...current,
-        status: closeResponse?.data?.status || 'ENDED',
+        status: closeResponse?.data?.status || 'COMPLETED',
       }));
       setQrCodeData('');
       setQrPayloadRaw('');
@@ -437,60 +496,131 @@ export const TeacherDashboard = () => {
         console.warn('Could not fetch final attendance records:', attErr);
       }
 
-      // API shapes:
-      //   getSessionById:      { data: { session, attendanceSummary } }
-      //   getSessionAttendance: { data: [...records], pagination: { summary: {...} } }
-      const fetchedRecords = Array.isArray(finalAttendance?.data) ? finalAttendance.data : [];
-      let finalRecords = fetchedRecords.length > 0 ? fetchedRecords : liveAttendanceRecords;
+      const fetchedRecords = Array.isArray(finalAttendance?.data)
+        ? finalAttendance.data
+        : Array.isArray(finalAttendance)
+          ? finalAttendance
+          : [];
+
+      // Merge fetchedRecords with latestLiveRecords so no scanned student is ever dropped
+      const latestLiveRecords = liveAttendanceRecordsRef.current || [];
+      const recordMap = new Map();
+      [...latestLiveRecords, ...fetchedRecords].forEach((r) => {
+        const key = r.studentId || r.student?.id || r.id;
+        if (key) recordMap.set(String(key).toLowerCase(), r);
+      });
+      let finalRecords = Array.from(recordMap.values());
 
       if (finalRecords.length === 0) {
         try {
-          await new Promise(r => setTimeout(r, 800));
+          await new Promise(r => setTimeout(r, 1000));
           const retry = await teacherService.getSessionAttendance(targetSessionId, { page: 1, limit: 100 }).catch(() => null);
-          if (Array.isArray(retry?.data) && retry.data.length > 0) {
-            finalRecords = retry.data;
+          const retryRecords = Array.isArray(retry?.data)
+            ? retry.data
+            : Array.isArray(retry)
+              ? retry
+              : [];
+          if (retryRecords.length > 0) {
+            finalRecords = retryRecords;
           }
-        } catch { /* silent */ }
+        } catch (retryErr) {
+          // ignore
+        }
       }
-      const finalSummary = sessionDetail?.data?.attendanceSummary
-        || finalAttendance?.pagination?.summary
-        || liveSummary;
+
+      // Summary comes from getSessionAttendance pagination.summary or getSessionById attendanceSummary
+      const finalSummary = finalAttendance?.pagination?.summary
+        || sessionDetail?.data?.attendanceSummary
+        || liveSummaryRef.current;
 
       // Build full student list with PRESENT/ABSENT status
       // finalRecords only contains students who scanned (PRESENT).
-      // We need to merge with all section students to show absent ones too.
+      // We merge with all section students to show absent ones too.
       let allStudentRecords = finalRecords;
       try {
-        const sectionId = (sessionDetail?.data?.session || activeSession)?.sectionId
-          || (sessionDetail?.data?.session || activeSession)?.section?.id;
-        if (sectionId) {
+        const sessionObj = sessionDetail?.data?.session || activeSession;
+        const sectionId = sessionObj?.sectionId
+          || sessionObj?.section?.id
+          || selectedSection?.sectionId
+          || selectedSection?.id;
+
+        // Prefer already-loaded sectionStudents (avoids extra network call)
+        let allStudents = sectionStudents.length > 0 ? sectionStudents : [];
+        if (allStudents.length === 0 && sectionId) {
           const sectionRes = await teacherService.getSectionStudents(sectionId).catch(() => null);
-          const allStudents = sectionRes?.data?.students || sectionRes?.students
-            || (Array.isArray(sectionRes?.data) ? sectionRes.data : []);
-          if (allStudents.length > 0) {
-            const presentIds = new Set(finalRecords.map(r => r.studentId));
-            const absentRows = allStudents
-              .filter(s => !presentIds.has(s.id))
-              .map(s => ({
-                id:          `absent-${s.id}`,
-                studentId:   s.id,
-                studentName: `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim() || 'Unknown',
-                email:       s.user?.email || '',
-                enrollmentNumber: s.enrollmentNumber || '',
-                status:      'ABSENT',
-                markedAt:    null,
-                markedVia:   null,
-              }));
-            allStudentRecords = [...finalRecords, ...absentRows];
-          }
+          allStudents = Array.isArray(sectionRes?.data) ? sectionRes.data
+            : sectionRes?.data?.students || sectionRes?.students || [];
         }
-      } catch { /* non-fatal — show what we have */ }
+
+        if (allStudents.length > 0) {
+          // Collect all possible present-student identifiers from scanned records
+          const presentIds = new Set();
+          finalRecords.forEach(r => {
+            if (r.studentId) presentIds.add(String(r.studentId).toLowerCase());
+            if (r.userId) presentIds.add(String(r.userId).toLowerCase());
+            if (r.student?.id) presentIds.add(String(r.student.id).toLowerCase());
+            if (r.user?.id) presentIds.add(String(r.user.id).toLowerCase());
+            if (r.rollNumber) presentIds.add(String(r.rollNumber).trim().toLowerCase());
+            if (r.enrollmentNumber) presentIds.add(String(r.enrollmentNumber).trim().toLowerCase());
+          });
+
+          // Helper: check if a section student matches any present identifier
+          const isPresent = (s) =>
+            presentIds.has(String(s.id).toLowerCase()) ||
+            presentIds.has(String(s.userId).toLowerCase()) ||
+            presentIds.has(String(s.user?.id).toLowerCase()) ||
+            (s.rollNumber && presentIds.has(String(s.rollNumber).trim().toLowerCase())) ||
+            (s.enrollmentNumber && presentIds.has(String(s.enrollmentNumber).trim().toLowerCase()));
+
+          const absentRows = allStudents
+            .filter(s => !isPresent(s))
+            .map(s => ({
+              id:          `absent-${s.id}`,
+              studentId:   s.id,
+              studentName: `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim() || s.name || 'Unknown',
+              email:       s.user?.email || s.email || '',
+              enrollmentNumber: s.enrollmentNumber || '',
+              status:      'ABSENT',
+              markedAt:    null,
+              markedVia:   null,
+            }));
+          allStudentRecords = [...finalRecords, ...absentRows];
+        }
+      } catch (buildErr) {
+        console.error('Error building absent rows:', buildErr?.message);
+      }
+
+      const totalStudents = Math.max(
+        allStudentRecords.length,
+        finalSummary?.totalStudents || 0,
+        sectionStudents.length || 0
+      );
+      // finalRecords contains only scanned students; count those not explicitly ABSENT as present
+      const presentCount = finalRecords.filter(r => {
+        const st = (r.status || '').toUpperCase();
+        return st !== 'ABSENT' && st !== 'NOT_PRESENT';
+      }).length;
+      const absentCount = Math.max(0, totalStudents - presentCount);
+      const attendancePercentage = totalStudents > 0
+        ? Number(((presentCount / totalStudents) * 100).toFixed(1))
+        : 0;
+
+      const computedSummary = {
+        ...finalSummary,
+        totalStudents,
+        presentCount,
+        absentCount,
+        attendancePercentage,
+      };
 
       setCompletedSummary({
-        session: sessionDetail?.data?.session || activeSession || {},
-        summary: finalSummary,
+        session: sessionDetail?.data?.session || sessionDetail?.session || activeSession || {},
+        summary: computedSummary,
         records: allStudentRecords,
       });
+      // Reset refs after session is complete
+      liveAttendanceRecordsRef.current = [];
+      liveSummaryRef.current = null;
 
       setActiveSession(null);
       setTimeLeftSeconds(0);
@@ -774,11 +904,13 @@ export const TeacherDashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {selectedProgram.academicYears?.flatMap((year) =>
               year.sections?.flatMap((sec) =>
-                (sec.subjects || []).map((sub) => ({
-                  ...sub,
-                  year,
-                  sec,
-                }))
+                (sec.subjects || [])
+                  .filter((sub) => sub.isActive !== false && sub.status !== 'INACTIVE')
+                  .map((sub) => ({
+                    ...sub,
+                    year,
+                    sec,
+                  }))
               )
             ).map((item, idx) => (
               <button
@@ -1164,9 +1296,9 @@ export const TeacherDashboard = () => {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div>
               <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${activeSession.status === 'ENDED' ? 'bg-slate-400' : 'bg-emerald-500 animate-ping'}`} />
-                <h2 className="text-lg font-bold text-slate-900">{activeSession.status === 'ENDED' ? 'Attendance Session Ended' : 'Attendance Session Active'}</h2>
-                <Badge variant="success">{activeSession.status === 'ENDED' ? 'ENDED' : 'LIVE'}</Badge>
+                <span className={`w-2.5 h-2.5 rounded-full ${['ENDED','COMPLETED'].includes(activeSession.status) ? 'bg-slate-400' : 'bg-emerald-500 animate-ping'}`} />
+                <h2 className="text-lg font-bold text-slate-900">{['ENDED','COMPLETED'].includes(activeSession.status) ? 'Attendance Session Ended' : 'Attendance Session Active'}</h2>
+                <Badge variant="success">{['ENDED','COMPLETED'].includes(activeSession.status) ? 'COMPLETED' : 'LIVE'}</Badge>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 {activeSession.subject?.name || selectedSubject?.subjectName} • Section {activeSession.section?.name || selectedSection?.sectionName}
@@ -1187,40 +1319,54 @@ export const TeacherDashboard = () => {
                 size="sm"
                 onClick={() => finishSession(activeSession?.id)}
                 isLoading={closingSession}
-                disabled={activeSession.status === 'ENDED'}
+                disabled={['ENDED','COMPLETED'].includes(activeSession.status)}
                 leftIcon={<StopCircle className="w-4 h-4" />}
               >
-                {activeSession.status === 'ENDED' ? 'Session Ended' : 'End Session'}
+                {['ENDED','COMPLETED'].includes(activeSession.status) ? 'Session Completed' : 'End Session'}
               </Button>
             </div>
           </div>
 
           {/* Live KPI Stat Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatBox
-              icon={Users}
-              label="Total Enrolled"
-              value={liveSummary?.totalStudents ?? sectionStudents.length ?? 0}
-              color="indigo"
-            />
-            <StatBox
-              icon={CheckCircle2}
-              label="Present"
-              value={liveSummary?.presentCount ?? liveAttendanceRecords.length ?? 0}
-              color="emerald"
-            />
-            <StatBox
-              icon={XCircle}
-              label="Absent"
-              value={liveSummary?.absentCount ?? Math.max(0, (liveSummary?.totalStudents || sectionStudents.length) - liveAttendanceRecords.length)}
-              color="rose"
-            />
-            <StatBox
-              icon={Award}
-              label="Attendance %"
-              value={liveSummary?.attendancePercentage != null ? `${liveSummary.attendancePercentage}%` : `${Math.round((liveAttendanceRecords.length / Math.max(1, sectionStudents.length)) * 100)}%`}
-              color="violet"
-            />
+            {(() => {
+              const total = liveSummary?.totalStudents || sectionStudents.length || 0;
+              const present = liveSummary?.presentCount ?? liveAttendanceRecords.length;
+              const absent = (liveSummary?.absentCount != null && liveSummary.absentCount > 0)
+                ? liveSummary.absentCount
+                : Math.max(0, total - present);
+              const pct = total > 0
+                ? (liveSummary?.attendancePercentage != null ? liveSummary.attendancePercentage : Math.round((present / total) * 100))
+                : 0;
+              return (
+                <>
+                  <StatBox
+                    icon={Users}
+                    label="Total Enrolled"
+                    value={total}
+                    color="indigo"
+                  />
+                  <StatBox
+                    icon={CheckCircle2}
+                    label="Present"
+                    value={present}
+                    color="emerald"
+                  />
+                  <StatBox
+                    icon={XCircle}
+                    label="Absent"
+                    value={absent}
+                    color="rose"
+                  />
+                  <StatBox
+                    icon={Award}
+                    label="Attendance %"
+                    value={`${pct}%`}
+                    color="violet"
+                  />
+                </>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1325,9 +1471,11 @@ export const TeacherDashboard = () => {
             {(() => {
               const presentRecords = (completedSummary.records || []).filter(r => r.status === 'PRESENT');
               const absentRecords  = (completedSummary.records || []).filter(r => r.status === 'ABSENT');
-              const total  = completedSummary.summary?.totalStudents ?? completedSummary.records?.length ?? 0;
+              const total  = completedSummary.summary?.totalStudents || completedSummary.records?.length || 0;
               const present = completedSummary.summary?.presentCount ?? presentRecords.length;
-              const absent  = absentRecords.length || (completedSummary.summary?.absentCount ?? Math.max(0, total - present));
+              const absent  = (completedSummary.summary?.absentCount != null && completedSummary.summary.absentCount > 0)
+                ? completedSummary.summary.absentCount
+                : (absentRecords.length || Math.max(0, total - present));
               const pct    = total > 0 ? ((present / total) * 100).toFixed(0) : (completedSummary.summary?.attendancePercentage ?? 0);
               return (<>
                 <StatBox icon={Users}        label="Total Section Students" value={total}     color="indigo" />

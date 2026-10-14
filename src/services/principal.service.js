@@ -79,6 +79,11 @@ export const principalService = {
     return response.data;
   },
 
+  deleteDepartment: async (id) => {
+    const response = await api.delete(`/principal/departments/${id}`);
+    return response.data;
+  },
+
   getProgramsByDepartment: async (deptId) => {
     const response = await api.get(`/principal/departments/${deptId}/programs`);
     return response.data;
@@ -91,6 +96,24 @@ export const principalService = {
 
   getSectionsByAcademicYear: async (academicYearId) => {
     const response = await api.get(`/principal/academic-years/${academicYearId}/sections`);
+    return response.data;
+  },
+
+  getSectionSubjects: async (sectionId) => {
+    const response = await api.get(`/principal/sections/${sectionId}/subjects`);
+    return response.data;
+  },
+
+  getSectionStudents: async (sectionId) => {
+    const response = await api.get(`/principal/sections/${sectionId}/students`);
+    return response.data;
+  },
+
+  getSectionStudentsSubjectAttendance: async (sectionId, subjectId, params) => {
+    const url = subjectId && subjectId !== 'ALL'
+      ? `/principal/sections/${sectionId}/students/attendance/${subjectId}`
+      : `/principal/sections/${sectionId}/students/attendance`;
+    const response = await api.get(url, { params });
     return response.data;
   },
 };

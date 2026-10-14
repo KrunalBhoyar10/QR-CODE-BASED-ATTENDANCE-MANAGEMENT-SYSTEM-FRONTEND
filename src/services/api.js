@@ -38,9 +38,12 @@ export const setOnAuthFailure = (cb) => {
 // ─── Request interceptor – attach Bearer token ────────────────────────────────
 api.interceptors.request.use(
   (config) => {
-    const token = tokenStorage.getAccessToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Never attach expired access token to refresh-token endpoint
+    if (!config.url?.includes('/auth/refresh-token')) {
+      const token = tokenStorage.getAccessToken();
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
     return config;
   },
@@ -64,10 +67,16 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Never attempt to refresh if the request was itself refresh-token or flagged to skip
+    if (!originalRequest || originalRequest._skipAuthRefresh || originalRequest.url?.includes('/auth/refresh-token')) {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       const refreshToken = tokenStorage.getRefreshToken();
 
       if (!refreshToken) {
+        tokenStorage.clearAuth();
         if (onAuthFailure) onAuthFailure();
         return Promise.reject(error);
       }
@@ -88,8 +97,12 @@ api.interceptors.response.use(
 
       try {
         // Use the same api instance so the Vite proxy intercepts /api/* correctly.
-        // Never use raw axios here — it bypasses the proxy and gets a 404.
-        const response = await api.post('/auth/refresh-token', { refreshToken });
+        // Explicitly set _skipAuthRefresh and _retry so failure never triggers another refresh attempt.
+        const response = await api.post(
+          '/auth/refresh-token',
+          { refreshToken },
+          { _skipAuthRefresh: true, _retry: true }
+        );
         const { accessToken, refreshToken: newRefresh } = response.data?.data || {};
         if (accessToken) {
           tokenStorage.setAccessToken(accessToken);
